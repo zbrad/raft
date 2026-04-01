@@ -68,3 +68,4 @@ compile_commands.json
 
 # raft build artifacts
 raft-*.tar.bz2
+build_*.log
