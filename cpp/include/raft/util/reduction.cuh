@@ -53,6 +53,20 @@ DI T warpReduce(T val, ReduceLambda reduce_op)
 }
 
 /**
+ * @brief Warp-level reduction with explicit raft::add_op
+ * @tparam T Value type to be reduced
+ * @param val input value
+ * @param reduce_op Reduction operation (raft::add_op)
+ * @return Reduction result. All lanes will have the valid result.
+ * @note Explicit specialization to disambiguate from CUB's warpReduce
+ */
+template <typename T>
+DI T warpReduce(T val, raft::add_op reduce_op)
+{
+  return logicalWarpReduce<WarpSize>(val, reduce_op);
+}
+
+/**
  * @brief Warp-level reduction
  * @tparam T Value type to be reduced
  * @param val input value
