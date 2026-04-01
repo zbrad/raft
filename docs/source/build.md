@@ -22,6 +22,7 @@ Both the C++ and Python APIs require CMake to build from source.
   - [Python libraries](#python-libraries)
 - [Using CMake directly](#using-cmake-directly)
 - [Build documentation](#build-documentation)
+- [Platform-specific build guides](#platform-specific-build-guides)
 - [Using RAFT in downstream projects](#using-raft-c-in-downstream-projects)
   - [CMake targets](#cmake-targets)
 
@@ -256,6 +257,16 @@ The documentation requires that the C++ and Python libraries have been built and
 ```
 ./build.sh libraft pylibraft raft-dask docs --compile-lib
 ```
+
+## Platform-specific build guides
+
+For platform-specific build instructions and known issues, refer to the following guides:
+
+- **[Building on aarch64 with CUDA 13.2+](./build_aarch64_cuda132.md)** - Instructions for ARM-based systems (Grace Hopper architecture) with CUDA 13.2 and Python 3.14+
+  - Includes build environment setup
+  - Known issues and workarounds
+  - Performance optimization tips
+  - Integration with downstream projects
 
 ## Using RAFT C++ in downstream projects
 

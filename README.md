@@ -247,7 +247,58 @@ pip install raft-dask-cu12
 
 These packages statically build RAFT's pre-compiled instantiations and so the C++ headers won't be readily available to use in your code.
 
-The [build instructions](https://docs.rapids.ai/api/raft/nightly/build/) contain more details on building RAFT from source and including it in downstream projects. You can also find a more comprehensive version of the above CPM code snippet the [Building RAFT C++ and Python from source](https://docs.rapids.ai/api/raft/nightly/build/#building-c-and-python-from-source) section of the build instructions.
+### Building from Source
+
+For detailed build instructions and platform-specific guides, see [docs/source/build.md](./docs/source/build.md).
+
+#### Quick Start - Building C++ Libraries
+
+```bash
+# Clone and enter the repository
+git clone https://github.com/rapidsai/raft.git
+cd raft
+
+# Install build dependencies
+python3 -m pip install cmake ninja sphinx pytest scipy scikit-learn cython
+
+# Build RAFT C++ libraries
+./build.sh libraft --compile-lib
+
+# Libraries will be installed to: cpp/build/install/lib/
+```
+
+#### CUDA 13.2+ on aarch64 (Grace Hopper)
+
+For ARM-based systems with CUDA 13.2 and Python 3.14+, see [Building on aarch64 with CUDA 13.2](./docs/source/build_aarch64_cuda132.md):
+
+```bash
+# Build C++ libraries
+./build.sh libraft --compile-lib
+
+# Load environment (optional)
+source cpp/build/raft_cu132_env.sh
+
+# Use in downstream projects
+cmake -DCMAKE_PREFIX_PATH=$(pwd)/cpp/build/install ..
+```
+
+#### Building Python Packages
+
+Python packages require conda/mamba with RAPIDS dependencies (RMM, etc.):
+
+```bash
+# Create conda environment
+mamba env create -f conda/environments/all_cuda-131_arch-$(uname -m).yaml
+mamba activate rapids_raft
+
+# Build and install pylibraft
+./build.sh libraft pylibraft --compile-lib
+
+# Build and install raft-dask (optional)
+./build.sh libraft pylibraft raft-dask --compile-lib
+```
+
+The [build instructions](./docs/source/build.md) contain more details on building RAFT from source and including it in downstream projects.
 
 
 ## Contributing

@@ -65,3 +65,6 @@ _text
 # clang tooling
 compile_commands.json
 .clangd/
+
+# raft build artifacts
+raft-*.tar.bz2
