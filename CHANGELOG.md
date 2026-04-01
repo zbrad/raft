@@ -101,7 +101,10 @@ Custom release for NVIDIA DGX Spark with Grace CPU (aarch64) and Blackwell GPU (
 * Fix `warpReduce` template ambiguity with CUB scan kernels — When CUB's scan kernels call `warpReduce(val, scan_op)` with `raft::add_op`, both `raft::warpReduce(T, ReduceLambda)` and `cub::detail::scan::warpReduce(Tp, ScanOpT&)` were viable candidates, causing ambiguous template instantiation errors during IVF-PQ build. Added explicit specialization `warpReduce(T val, raft::add_op reduce_op)` to prefer RAFT's implementation and resolve the conflict. **This fix enables IVF-PQ (inverted file product quantization) to build and run on aarch64-cu132-sm103 for the first time** — the template ambiguity previously blocked all IVF-PQ compilation on this platform, making approximate nearest neighbor search unavailable.
 
 ### 🛠️ Improvements
-* Add regression test for `warpReduce` template disambiguation — New test kernel `test_warp_reduce_with_add_op_kernel` explicitly exercises the pattern that triggered the template ambiguity: calling `warpReduce(val, raft::add_op{})`. This ensures the fix remains robust and prevents reintroduction of the ambiguity in future RAFT updates.
+* Add regression test for `warpReduce` template disambiguation — New test kernel `test_warp_reduce_with_add_op_kernel` explicitly exercises the pattern that triggered the template ambiguity: calling `warpReduce(val, raft::add_op{})`. This ensures the fix remains robust and prevents reintroduction of the ambiguity in future RAFT updates. (Note: initial expected value of 316 was incorrect and corrected to 158 — sum of all 64 input elements across two warps.)
+* Add regression test for `laplacian.cuh` `NZType=long` type mismatch fix — New test `Raft.ComputeGraphLaplacianCOOLongNZType` uses `NZType=long` (64-bit) on a COO adjacency matrix to exercise the exact code path that caused CUDA context corruption on aarch64 with CCCL 3.4.0. Verifies correct Laplacian values post-fix.
+* Add CUDA 13.2 conda environment files (`all_cuda-132_arch-aarch64.yaml`, `all_cuda-132_arch-x86_64.yaml`) and update `dependencies.yaml` with `cuda-version=13.2` matrix entry.
+* Add `requirements-build-cuda132.txt` with pinned pip dependencies for building `pylibraft` and `raft-dask` on CUDA 13.2 without conda.
 
 ---
 

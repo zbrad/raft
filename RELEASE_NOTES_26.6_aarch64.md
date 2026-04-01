@@ -214,7 +214,7 @@ DI T warpReduce(T val, raft::add_op reduce_op)
 This disambiguates in favour of RAFT's implementation without changing behaviour.
 
 #### Regression Test
-`WarpReduceAddOpTest/WarpReduceAddOpTestInt.WARP_REDUCE_WITH_ADD_OP` in `cpp/tests/util/reduction.cu` validates the fix. Note: the initial test had an incorrect expected value (316 vs correct 158) which was corrected in this release.
+`WarpReduceAddOpTest/WarpReduceAddOpTestInt.WARP_REDUCE_WITH_ADD_OP` in `cpp/tests/util/reduction.cu` validates the fix. Note: the initial test had an incorrect expected value (316 vs correct 158 — sum of all 64 input elements across two warps via `atomicAdd`) which was corrected in this release.
 
 ## Build Support: CUDA 13.2
 
@@ -249,11 +249,18 @@ Added `requirements-build-cuda132.txt` with pinned pip dependencies for setting 
 - ✅ Comprehensive environment setup documentation
 - ✅ Downstream project integration examples
 
+### Regression Tests Added
+| Test | File | Validates |
+|------|------|-----------|
+| `Raft.ComputeGraphLaplacianCOOLongNZType` | `cpp/tests/sparse/laplacian.cu` | `laplacian.cuh` fix: `NZType=long` COO path no longer corrupts CUDA context |
+| `WarpReduceAddOpTest/.WARP_REDUCE_WITH_ADD_OP` | `cpp/tests/util/reduction.cu` | `warpReduce` disambiguation fix: `raft::add_op` overload preferred over CUB |
+
 ### Validation
 - ✅ Full test suite passes on Grace Hopper (aarch64)
 - ✅ Verified with multiple matrix sizes and data types
 - ✅ Validated with both CSR and COO sparse formats
 - ✅ warpReduce disambiguation verified on aarch64 + CUDA 13.2
+- ✅ Laplacian `NZType=long` regression test passes on aarch64 + CUDA 13.2
 
 ## Previous Release: RAFT 26.04
 RAFT 26.6 is a follow-up to 26.04 with critical bug fixes for aarch64 systems. Users on other architectures can continue using RAFT 26.04 until RAFT 27.0.
