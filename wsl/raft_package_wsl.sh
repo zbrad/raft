@@ -1,7 +1,7 @@
 #!/bin/bash
 export PATH=/home/zbrad/.local/bin:/usr/local/cuda-13.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${PROJECT_ROOT}/cpp/build/install"
 PKG_NAME=raft-26.6-x86_64-cuda132
 PKG_DIR=/tmp/${PKG_NAME}
