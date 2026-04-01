@@ -6,7 +6,7 @@ files:
   all:
     output: conda
     matrix:
-      cuda: ["12.9", "13.3"]
+      cuda: ["12.9", "13.1", "13.2", "13.3"]
       arch: [x86_64, aarch64]
     includes:
       - build_common

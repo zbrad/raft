@@ -195,8 +195,9 @@ class ReductionTest : public testing::TestWithParam<std::vector<int>> {  // NOLI
 
   void run_warp_reduce_with_add_op()
   {
-    // Two warps of 32 threads each, sum of test_vector (158) per warp = 316 total
-    reduction_launch::run_warp_reduce_with_add_op(arr_d, 316, stream);
+    // Two warps of 32 threads each. Warp 0 sums elements 0-31 (=78), warp 1 sums elements 32-63
+    // (=80). atomicAdd from both warp leaders gives 158 = total sum of test_vector.
+    reduction_launch::run_warp_reduce_with_add_op(arr_d, 158, stream);
   }
 };
 

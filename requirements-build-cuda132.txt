@@ -1,0 +1,21 @@
+# Python build requirements for RAFT on aarch64 + CUDA 13.2
+# Install with:
+#   pip install -r requirements-build-cuda132.txt \
+#     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+
+--extra-index-url=https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+
+# Build tools
+rapids-build-backend>=0.4.0,<0.5.0
+scikit-build-core[pyproject]>=0.11.0
+
+# CUDA 13.x Python bindings
+cuda-python>=13.0.1,<14.0
+
+# RAPIDS dependencies (nightly wheels, CUDA 13 suffixed)
+librmm-cu13==26.6.*,>=0.0.0a0
+rmm-cu13==26.6.*,>=0.0.0a0
+rapids-logger==0.2.*,>=0.0.0a0
+
+# UCX (required for raft-dask)
+libucx-cu13>=1.19.0,<1.19.1

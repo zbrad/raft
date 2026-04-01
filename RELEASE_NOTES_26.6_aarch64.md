@@ -191,12 +191,58 @@ The package is optimized for SM_121a (Grace Hopper) with automatic GPU architect
 ### Downstream Projects
 Projects using RAFT 26.04 should recompile against RAFT 26.6 to ensure the Laplacian fix is incorporated. No API changes are required.
 
+## Fix: warpReduce Template Ambiguity with raft::add_op
+
+### Issue
+**Type**: Template Ambiguity / IVF-PQ Build Failure  
+**Severity**: HIGH  
+**Affected Component**: `raft/util/reduction.cuh`
+
+When CUB's scan kernels (activated by IVF-PQ) called `warpReduce(val, scan_op)` with `raft::add_op`, both `raft::warpReduce(T, ReduceLambda)` and `cub::detail::scan::warpReduce(Tp, ScanOpT&)` matched, causing an ambiguous template instantiation error.
+
+#### Solution
+Added an explicit overload in `raft/util/reduction.cuh`:
+
+```cpp
+template <typename T>
+DI T warpReduce(T val, raft::add_op reduce_op)
+{
+  return logicalWarpReduce<WarpSize>(val, reduce_op);
+}
+```
+
+This disambiguates in favour of RAFT's implementation without changing behaviour.
+
+#### Regression Test
+`WarpReduceAddOpTest/WarpReduceAddOpTestInt.WARP_REDUCE_WITH_ADD_OP` in `cpp/tests/util/reduction.cu` validates the fix. Note: the initial test had an incorrect expected value (316 vs correct 158) which was corrected in this release.
+
+## Build Support: CUDA 13.2
+
+### Conda Environments
+Added conda environment files for CUDA 13.2:
+- `conda/environments/all_cuda-132_arch-aarch64.yaml`
+- `conda/environments/all_cuda-132_arch-x86_64.yaml`
+
+### Python Build Requirements
+Added `requirements-build-cuda132.txt` with pinned pip dependencies for setting up a Python build environment on CUDA 13.2:
+- `rapids-build-backend>=0.4.0,<0.5.0`
+- `scikit-build-core[pyproject]>=0.11.0`
+- `cuda-python>=13.0.1,<14.0`
+- `rmm-cu13`, `librmm-cu13`, `libucx-cu13` (from rapidsai-wheels-nightly)
+
 ## What's New in RAFT 26.6
 
 ### Bug Fixes
 - ✅ **Critical**: Fixed Laplacian computation type mismatch (SM_121a, CCCL 3.4.0)
 - ✅ Eliminated CUDA context corruption in sparse Laplacian algorithms
 - ✅ Fixed 64-bit index support in graph algorithms
+- ✅ Fixed `warpReduce` template ambiguity with `raft::add_op` (IVF-PQ build failure)
+- ✅ Corrected regression test expected value for warpReduce reduction
+
+### Build & Environment
+- ✅ Added CUDA 13.2 conda environment files (aarch64 and x86_64)
+- ✅ Added `requirements-build-cuda132.txt` for pip-based Python build setup
+- ✅ `dependencies.yaml` updated with `cuda-version=13.2` matrix entry
 
 ### Documentation
 - ✅ Added platform-specific build guide for aarch64 + CUDA 13.2
@@ -207,6 +253,7 @@ Projects using RAFT 26.04 should recompile against RAFT 26.6 to ensure the Lapla
 - ✅ Full test suite passes on Grace Hopper (aarch64)
 - ✅ Verified with multiple matrix sizes and data types
 - ✅ Validated with both CSR and COO sparse formats
+- ✅ warpReduce disambiguation verified on aarch64 + CUDA 13.2
 
 ## Previous Release: RAFT 26.04
 RAFT 26.6 is a follow-up to 26.04 with critical bug fixes for aarch64 systems. Users on other architectures can continue using RAFT 26.04 until RAFT 27.0.
