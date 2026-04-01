@@ -90,6 +90,20 @@
 
 **Full Changelog**: https://github.com/rapidsai/raft/compare/v26.04.00a...release/26.04
 
+# raft 26.6 for aarch64-cu132-sm103
+
+## Branch: zbrad/raft gb10
+
+Custom release for NVIDIA DGX Spark with Grace CPU (aarch64) and Blackwell GPU (SM 103), CUDA 13.2.
+
+### 🐛 Bug Fixes
+* Fix `warpReduce` template ambiguity with CUB scan kernels — When CUB's scan kernels call `warpReduce(val, scan_op)` with `raft::add_op`, both `raft::warpReduce(T, ReduceLambda)` and `cub::detail::scan::warpReduce(Tp, ScanOpT&)` were viable candidates, causing ambiguous template instantiation errors during IVF-PQ build. Added explicit specialization `warpReduce(T val, raft::add_op reduce_op)` to prefer RAFT's implementation and resolve the conflict. Enables successful compilation of cuVS IVF-PQ index construction on aarch64-cu132-sm103 target.
+
+### 🛠️ Improvements
+* Add regression test for `warpReduce` template disambiguation — New test kernel `test_warp_reduce_with_add_op_kernel` explicitly exercises the pattern that triggered the template ambiguity: calling `warpReduce(val, raft::add_op{})`. This ensures the fix remains robust and prevents reintroduction of the ambiguity in future RAFT updates.
+
+---
+
 # raft 26.02.00 (4 Feb 2026)
 
 ### 🚨 Breaking Changes
