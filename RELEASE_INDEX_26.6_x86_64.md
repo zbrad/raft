@@ -1,6 +1,6 @@
 # RAFT 26.6 Release Index — x86_64
 
-**Release Date**: April 1, 2026 | **Platform**: x86_64 | **CUDA**: 13.2 | **GPU**: SM_120a
+**Release Date**: April 1, 2026 | **Platform**: x86_64 | **CUDA**: 13.2 | **GPU**: SM_120
 
 ---
 
@@ -23,7 +23,7 @@
 | RAFT Version | 26.6 |
 | CUDA | 13.2.51 |
 | CCCL | 3.4.0 |
-| GPU Arch (verified) | SM_120a (Blackwell) |
+| GPU Arch (verified) | SM_120 (Blackwell) |
 | GCC | 13.3.0 |
 | CMake | 3.30.4 |
 | Tests Passed | 2337 / 2337 |

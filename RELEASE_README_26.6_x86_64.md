@@ -1,11 +1,11 @@
 # RAFT 26.6 — x86_64 Release
 
-**Date**: April 1, 2026 | **CUDA**: 13.2 | **Arch**: x86_64 / SM_120a (Blackwell)
+**Date**: April 1, 2026 | **CUDA**: 13.2 | **Arch**: x86_64 / SM_120 (Blackwell)
 
 ## What's New
 
 - **Fix**: `warpReduce` template ambiguity with `raft::add_op` — required for IVF-PQ with CCCL 3.4.0
-- **Validated**: 2337 tests pass on x86_64 + CUDA 13.2 + SM_120a
+- **Validated**: 2337 tests pass on x86_64 + CUDA 13.2 + SM_120
 - **Build**: WSL build scripts and LF line-ending enforcement added
 
 ## Quick Start
@@ -30,7 +30,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 
 ```bash
 cmake -DCMAKE_PREFIX_PATH=${RAFT_ROOT} \
-      -DCMAKE_CUDA_ARCHITECTURES=120a \
+      -DCMAKE_CUDA_ARCHITECTURES=120 \
       ..
 ```
 
@@ -54,7 +54,7 @@ cmake -DCMAKE_PREFIX_PATH=${RAFT_ROOT} \
 
 - x86_64 Linux
 - CUDA 13.2+
-- NVIDIA GPU (SM_120a verified; other Ampere/Hopper/Blackwell compatible)
+- NVIDIA GPU (SM_120 verified; other Ampere/Hopper/Blackwell compatible)
 - CMake 3.30.4+
 - GCC 13+
 

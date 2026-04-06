@@ -3,7 +3,7 @@
 **Release Date**: April 1, 2026
 **Package**: `raft-26.6-x86_64-cuda132.tar.bz2` (6.4 MB)
 **Platform**: x86_64
-**GPU Architecture**: SM_120a (Blackwell)
+**GPU Architecture**: SM_120 (Blackwell)
 
 ## Overview
 
@@ -56,7 +56,7 @@ This disambiguates in favour of RAFT's implementation without changing behaviour
 
 ### Verified
 - **NVIDIA Blackwell Architecture**
-  - Compute Capability: SM_120a
+  - Compute Capability: SM_120
   - Auto-detected GPU architecture during build
 
 ### Compatible
@@ -64,7 +64,7 @@ This disambiguates in favour of RAFT's implementation without changing behaviour
 
 ## Testing & Validation
 
-### Test Results on x86_64 / CUDA 13.2 / SM_120a
+### Test Results on x86_64 / CUDA 13.2 / SM_120
 
 | Test Suite | Tests | Status |
 |-----------|-------|--------|
@@ -129,7 +129,7 @@ cmake \
   -DCMAKE_PREFIX_PATH=/path/to/raft-26.6-x86_64-cuda132 \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
-  -DCMAKE_CUDA_ARCHITECTURES=120a \
+  -DCMAKE_CUDA_ARCHITECTURES=120 \
   ..
 make -j$(nproc)
 ```
@@ -166,4 +166,4 @@ sha256sum -c CHECKSUMS_x86_64
 **RAFT Version**: 26.6
 **Release Date**: April 1, 2026
 **Package**: raft-26.6-x86_64-cuda132.tar.bz2
-**Platform**: x86_64 / SM_120a / CUDA 13.2
+**Platform**: x86_64 / SM_120 / CUDA 13.2
