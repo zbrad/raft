@@ -71,3 +71,4 @@ raft-*.tar.bz2
 build_*.log
 .claude/settings.local.json
 .vscode/
+cpp/build*/
