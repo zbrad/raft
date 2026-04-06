@@ -58,15 +58,11 @@ export CMAKE_PREFIX_PATH="$RAFT_ROOT:${CMAKE_PREFIX_PATH}"
 ### 4. Verify Installation
 
 ```bash
-# Check that CMake can find RAFT
-cmake --find-package \
-  -DNAME=raft \
-  -DCOMPILER_PATH=/usr/bin/cc \
-  -DLANGUAGE=C \
-  -DMODE=EXIST
+# Check that RAFT cmake config is present
+ls $RAFT_ROOT/lib/cmake/raft/
 
-# List available RAFT libraries
-ldd $RAFT_ROOT/lib/libraft.so
+# Confirm libraft.so exists and links correctly
+ldd $RAFT_ROOT/lib/libraft.so | grep -E 'cuda|rmm|not found'
 ```
 
 ## Using RAFT in Your Project
@@ -75,7 +71,7 @@ ldd $RAFT_ROOT/lib/libraft.so
 
 **CMakeLists.txt:**
 ```cmake
-cmake_minimum_required(VERSION 3.26.4 LANGUAGES CXX CUDA)
+cmake_minimum_required(VERSION 3.30.4 LANGUAGES CXX CUDA)
 project(MyRaftProject LANGUAGES CXX CUDA)
 
 # Set RAFT location
@@ -195,18 +191,41 @@ nvcc -std=c++20 \
 ./test_laplacian
 ```
 
+## Python Wheel Installation (DGX Spark / SM_121 only)
+
+Two wheels are required: `libraft-cu13` (bundles `libraft.so`) and `pylibraft-spark-cu13` (Cython extensions).
+
+```bash
+BASE=https://github.com/zbrad/raft/releases/download/v26.06.00-aarch64-cuda132-spark
+
+pip install \
+    --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+    "${BASE}/libraft_cu13-26.6.0-py3-none-linux_aarch64.whl" \
+    "${BASE}/pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl"
+```
+
+Or add to `requirements.txt`:
+
+```
+--extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+libraft-cu13 @ https://github.com/zbrad/raft/releases/download/v26.06.00-aarch64-cuda132-spark/libraft_cu13-26.6.0-py3-none-linux_aarch64.whl
+pylibraft-spark-cu13 @ https://github.com/zbrad/raft/releases/download/v26.06.00-aarch64-cuda132-spark/pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl
+```
+
+> **Note**: `pylibraft-spark-cu13` is compiled for SM_121 only and will not run on other GPU architectures.
+> The RAPIDS nightly index is required for `rmm-cu13==26.6.*` and `rapids-logger==0.2.*` runtime dependencies.
+
 ## Documentation
 
 For more information, see:
-- **Release Notes**: `RELEASE_NOTES_26.6.md`
-- **Build Details**: RAFT repository `docs/source/build_aarch64_cuda132.md`
+- **Release Notes**: `RELEASE_NOTES_26.6_aarch64.md`
 - **API Reference**: https://docs.rapids.ai/api/raft/stable/
 
 ## Support
 
 Encountering issues? Check:
 1. **Checklist above** - Most issues are environment-related
-2. **GitHub Issues** - https://github.com/rapidsai/raft/issues
+2. **GitHub Issues** - https://github.com/zbrad/raft/issues
 3. **RAFT Documentation** - https://docs.rapids.ai/api/raft/
 
 ## Package Contents Summary

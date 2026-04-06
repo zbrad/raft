@@ -1,15 +1,15 @@
 # RAFT 26.6 Release - Complete Index
 
-**Release Date**: March 31, 2026  
-**Platform**: aarch64 (ARM-based with NVIDIA Grace Hopper GPUs)  
+**Release Date**: April 6, 2026  
+**Platform**: aarch64 (NVIDIA GB10 / DGX Spark)  
 **CUDA Version**: 13.2+  
-**GPU Architecture**: SM_121a  
+**GPU Architecture**: SM_121 (GB10 / Grace Blackwell)
 
 ---
 
 ## 📦 Release Deliverables
 
-### 1. Binary Package
+### 1. C++ Binary Package
 **File**: `raft-26.6-aarch64-cuda132.tar.bz2` (3.2 MB)
 
 The complete pre-compiled RAFT library for aarch64 systems with CUDA 13.2.
@@ -28,7 +28,29 @@ tar -xjf raft-26.6-aarch64-cuda132.tar.bz2
 
 ---
 
-### 2. Checksum File
+### 2. Python Wheels (DGX Spark / SM_121 only)
+
+**Files**:
+- `libraft_cu13-26.6.0-py3-none-linux_aarch64.whl` (3.3 MB) — C++ runtime, bundles `libraft.so`
+- `pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl` (336 KB) — Cython extensions
+
+**Use When**: You need to use RAFT from Python on a DGX Spark (SM_121).
+
+> These wheels target SM_121 **only** and will not run on other GPU architectures.
+> `pylibraft-spark-cu13` is named separately from `pylibraft-cu13` to prevent accidental installation
+> on incompatible hardware. See `RELEASE_NOTES_26.6_aarch64.md` for the full naming rationale.
+
+```bash
+BASE=https://github.com/zbrad/raft/releases/download/v26.06.00-aarch64-cuda132-spark
+pip install \
+    --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+    "${BASE}/libraft_cu13-26.6.0-py3-none-linux_aarch64.whl" \
+    "${BASE}/pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl"
+```
+
+---
+
+### 3. Checksum File
 **File**: `CHECKSUMS`
 
 Checksums for verifying package integrity.
@@ -47,8 +69,8 @@ sha256sum -c CHECKSUMS
 
 ## 📚 Documentation
 
-### 3. Release README
-**File**: `RELEASE_README_26.6_aarch64.md` (5.9 KB)
+### 4. Release README
+**File**: `RELEASE_README_26.6_aarch64.md`
 
 **For**: Quick orientation and overview  
 **Contains**:
@@ -62,8 +84,8 @@ sha256sum -c CHECKSUMS
 
 ---
 
-### 4. Release Notes
-**File**: `RELEASE_NOTES_26.6_aarch64.md` (8.3 KB)
+### 5. Release Notes
+**File**: `RELEASE_NOTES_26.6_aarch64.md`
 
 **For**: Detailed technical information  
 **Contains**:
@@ -81,8 +103,8 @@ sha256sum -c CHECKSUMS
 
 ---
 
-### 5. Installation Guide
-**File**: `INSTALL_GUIDE_26.6_aarch64.md` (5.1 KB)
+### 6. Installation Guide
+**File**: `INSTALL_GUIDE_26.6_aarch64.md`
 
 **For**: Getting RAFT up and running  
 **Contains**:
@@ -121,13 +143,15 @@ sha256sum -c CHECKSUMS
 
 ## 📋 Document Summary Table
 
-| Document | Size | Time | Purpose | Audience |
-|----------|------|------|---------|----------|
-| RELEASE_README_26.6_aarch64.md | 5.9 KB | 5 min | Overview & quick start | Everyone |
-| RELEASE_NOTES_26.6_aarch64.md | 8.3 KB | 15 min | Technical details & fix explanation | Developers, integrators |
-| INSTALL_GUIDE_26.6_aarch64.md | 5.1 KB | 10 min | Step-by-step installation | Users wanting to set up RAFT |
-| CHECKSUMS | 268 B | 1 min | Verify package integrity | Security-conscious users |
-| raft-26.6-aarch64-cuda132.tar.bz2 | 3.2 MB | - | Binary package | Everyone |
+| Document | Purpose | Audience |
+|----------|---------|----------|
+| RELEASE_README_26.6_aarch64.md | Overview & quick start | Everyone |
+| RELEASE_NOTES_26.6_aarch64.md | Technical details & fix explanation | Developers, integrators |
+| INSTALL_GUIDE_26.6_aarch64.md | Step-by-step installation (C++ and Python) | Users setting up RAFT |
+| CHECKSUMS | Verify package integrity | Security-conscious users |
+| raft-26.6-aarch64-cuda132.tar.bz2 | C++ binary package | C++/CUDA projects |
+| libraft_cu13-26.6.0-*.whl | C++ runtime wheel | Python on DGX Spark |
+| pylibraft_spark_cu13-26.6.0-*.whl | Python wheel | Python on DGX Spark |
 
 ---
 
@@ -195,7 +219,10 @@ All release files are located in the repository root:
 ├── RELEASE_NOTES_26.6_aarch64.md           (detailed info)
 ├── INSTALL_GUIDE_26.6_aarch64.md           (how to install)
 ├── CHECKSUMS                               (verify integrity)
-└── raft-26.6-aarch64-cuda132.tar.bz2      (the package)
+├── raft-26.6-aarch64-cuda132.tar.bz2      (C++ package)
+└── dist/spark/                             (Python wheels)
+    ├── libraft_cu13-26.6.0-py3-none-linux_aarch64.whl
+    └── pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl
 ```
 
 ---

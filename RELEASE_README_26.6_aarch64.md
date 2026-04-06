@@ -1,14 +1,18 @@
 # RAFT 26.6 Release - aarch64 + CUDA 13.2
 
-**Release Date**: March 31, 2026
+**Release Date**: April 6, 2026
 
-## 📦 Release Package
+## 📦 Release Packages
 
-**File**: `raft-26.6-aarch64-cuda132.tar.bz2`  
-**Size**: 3.2 MB  
-**Platform**: aarch64 (ARM-based, Grace Hopper GPU)  
+| File | Size | Description |
+|------|------|-------------|
+| `raft-26.6-aarch64-cuda132.tar.bz2` | 3.2 MB | C++ headers, shared libraries, CMake targets |
+| `libraft_cu13-26.6.0-py3-none-linux_aarch64.whl` | 3.3 MB | C++ runtime wheel — bundles `libraft.so` (SM_121) |
+| `pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl` | 336 KB | Python wheel — Cython extensions (SM_121 only) |
+
+**Platform**: aarch64 (ARM-based, NVIDIA GB10 / DGX Spark)  
 **CUDA**: 13.2+  
-**Architecture**: SM_121a  
+**Architecture**: SM_121 (GB10)
 
 ## 🚨 Critical Fix
 
@@ -26,14 +30,17 @@ Type mismatch in `raft/sparse/linalg/detail/laplacian.cuh`:
 
 | File | Purpose |
 |------|---------|
-| `raft-26.6-aarch64-cuda132.tar.bz2` | **Main package** - RAFT libraries, headers, CMake configs |
+| `raft-26.6-aarch64-cuda132.tar.bz2` | C++ libraries, headers, CMake configs |
+| `libraft_cu13-26.6.0-py3-none-linux_aarch64.whl` | C++ runtime wheel (bundles `libraft.so`) |
+| `pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl` | Python wheel (SM_121-only Cython extensions) |
 | `CHECKSUMS` | SHA256 and MD5 checksums for package verification |
-| `RELEASE_NOTES_26.6.md` | Complete release notes with fix details and technical info |
-| `INSTALL_GUIDE_26.6.md` | Quick start installation and usage guide |
-| `RELEASE_README.md` | This file |
+| `RELEASE_NOTES_26.6_aarch64.md` | Complete release notes with fix details and technical info |
+| `INSTALL_GUIDE_26.6_aarch64.md` | Quick start installation and usage guide |
+| `RELEASE_README_26.6_aarch64.md` | This file |
 
 ## 🚀 Quick Start
 
+**C++ (tar package):**
 ```bash
 # 1. Extract
 tar -xjf raft-26.6-aarch64-cuda132.tar.bz2
@@ -47,7 +54,16 @@ export CMAKE_PREFIX_PATH=$RAFT_ROOT:${CMAKE_PREFIX_PATH}
 cmake -DCMAKE_PREFIX_PATH=$RAFT_ROOT ..
 ```
 
-For detailed instructions, see `INSTALL_GUIDE_26.6.md`
+**Python (pip — DGX Spark / SM_121 only):**
+```bash
+BASE=https://github.com/zbrad/raft/releases/download/v26.06.00-aarch64-cuda132-spark
+pip install \
+    --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+    "${BASE}/libraft_cu13-26.6.0-py3-none-linux_aarch64.whl" \
+    "${BASE}/pylibraft_spark_cu13-26.6.0-cp311-abi3-linux_aarch64.whl"
+```
+
+For detailed instructions, see `INSTALL_GUIDE_26.6_aarch64.md`
 
 ## 📊 Hardware Support
 
@@ -168,17 +184,11 @@ MD5:    194e4f4b29af97b897d44cda2de7b145
 ## 🤝 Support & Feedback
 
 ### Report Issues
-https://github.com/rapidsai/raft/issues
-
-### Platform-Specific Help
-See `docs/source/build_aarch64_cuda132.md` in RAFT repository for:
-- Detailed build instructions
-- Known issues and workarounds
-- Performance optimization tips
+https://github.com/zbrad/raft/issues
 
 ### Questions?
-1. Check `INSTALL_GUIDE_26.6.md` for common issues
-2. Review `RELEASE_NOTES_26.6.md` for technical details
+1. Check `INSTALL_GUIDE_26.6_aarch64.md` for common issues
+2. Review `RELEASE_NOTES_26.6_aarch64.md` for technical details
 3. Open an issue on GitHub with:
    - CUDA version (`nvcc --version`)
    - GPU architecture (`nvidia-smi`)
@@ -224,6 +234,5 @@ raft-26.6-aarch64-cuda132/
 ---
 
 **RAFT Release 26.6**  
-March 31, 2026  
-Platform: aarch64 (Grace Hopper)  
-CUDA: 13.2+
+April 6, 2026  
+Platform: aarch64 (NVIDIA GB10 / DGX Spark)  
