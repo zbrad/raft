@@ -16,6 +16,8 @@ htmlcov
 build/
 build_prims/
 dist/
+# Python virtual environment (spark build)
+.venv/
 python/**/**/*.cpp
 python/raft-dask/record.txt
 python/pylibraft/record.txt

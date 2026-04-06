@@ -1,0 +1,114 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Spark-specific project configuration for the DGX Spark (SM_121 / aarch64 / CUDA 13.2) build.
+#
+# This file describes the Python environment and dependency bounds verified on
+# NVIDIA DGX Spark hardware as of RAFT 26.6.  It is NOT a pip-installable
+# package — it is used by:
+#   - spark/raft_wheel_spark.sh  (build + publish)
+#   - .venv creation (see .python-version)
+#   - IDE / type-checker configuration
+#
+# Naming convention rationale
+# ----------------------------
+# libraft-cu13         Standard RAPIDS package name (unchanged).  pylibraft depends on
+#                      "libraft-cu13==26.6.*" — keeping this name avoids any dep-resolver
+#                      patching.  This wheel bundles libraft.so built for SM_121 only.
+#
+# pylibraft-spark-cu13 Diverges from the RAPIDS "pylibraft-cu13" name because the Cython
+#                      extensions are compiled for SM_121 only.  An SM_121-only binary
+#                      raises CUDA_ERROR_NO_BINARY_FOR_GPU on every other architecture.
+#                      The -spark suffix prevents accidental installation on incompatible
+#                      hardware while allowing coexistence with a future multi-arch
+#                      pylibraft-cu13 in the same environment.
+
+[project]
+name = "raft-spark"
+version = "26.6.0"
+description = "RAFT build tooling for DGX Spark (SM_121 / aarch64 / CUDA 13.2)"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [{ name = "NVIDIA Corporation" }]
+license = "Apache-2.0"
+
+# Python 3.14 is the version installed on DGX Spark and verified against
+# all dependencies below.  3.14 is required (not just >=3.11) because:
+#   - cuda-python 13.2.0 ships abi3 wheels from cp311, but the runtime
+#     on this machine is 3.14 — we enforce the exact minor to prevent
+#     accidental environment mismatches on a shared system.
+requires-python = ">=3.14"
+
+# Runtime Python deps (also the wheel runtime deps for pylibraft-spark-cu13).
+# All bounds are tightened to the versions validated on DGX Spark as of 2026-04-06.
+dependencies = [
+    # CUDA Python bindings — ABI-compatible across 13.x; cap at <14 for CUDA major
+    "cuda-python>=13.2.0,<14.0",
+    # NumPy — 2.x required for free-threaded GIL support in Python 3.14
+    "numpy>=2.0.0,<3.0",
+    # RAPIDS runtime wheels (nightly, pinned to 26.6 minor)
+    "libraft-cu13==26.6.*,>=0.0.0a0",
+    "rmm-cu13==26.6.*,>=0.0.0a0",
+    "librmm-cu13==26.6.*,>=0.0.0a0",
+    "rapids-logger==0.2.*,>=0.0.0a0",
+]
+
+[project.urls]
+Homepage = "https://github.com/zbrad/raft"
+"Release" = "https://github.com/zbrad/raft/releases/tag/v26.06.00-aarch64-cuda132-spark"
+
+# ---------------------------------------------------------------------------
+# Build tools (used by spark/raft_wheel_spark.sh, NOT by pip when installing
+# this pyproject).
+# ---------------------------------------------------------------------------
+[project.optional-dependencies]
+build = [
+    # rapids-build-backend: 0.4.x series is stable; 0.5.0 is not yet released
+    "rapids-build-backend>=0.4.1,<0.5.0",
+    # scikit-build-core 0.12.x: validated; 0.12.2 is the latest
+    "scikit-build-core[pyproject]>=0.12.0,<0.13.0",
+    "cmake>=3.30.4",
+    "ninja",
+    "cython>=3.0",
+    # UCX for raft-dask
+    "libucx-cu13>=1.19.0,<1.19.1",
+]
+test = [
+    "cupy-cuda13x>=14.0.0",
+    "pytest>=8.0",
+    "pytest-cov",
+    "scikit-learn",
+    "scipy",
+]
+
+# ---------------------------------------------------------------------------
+# Tool configuration (linting/type-checking apply to spark/ scripts helpers)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+extend = "../pyproject.toml"
+
+[tool.mypy]
+python_version = "3.14"
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Platform / environment documentation  (not enforced by pip, informational)
+# ---------------------------------------------------------------------------
+[tool.spark-env]
+cuda_version = "13.2"
+cuda_version_compact = "132"
+cuda_arch = "121"          # SM_12.1 — NVIDIA GB10 (DGX Spark)
+arch = "aarch64"
+pip_index_extra = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple"
+release_tag = "v26.06.00-aarch64-cuda132-spark"
+
+# Verified installed versions (as of 2026-04-06, DGX Spark, fresh .venv)
+[tool.spark-env.verified-versions]
+"cuda-python"             = "13.2.0"
+"numpy"                   = "2.4.4"
+"rapids-build-backend"    = "0.4.1"
+"scikit-build-core"       = "0.12.2"
+"librmm-cu13"             = "26.6.0a30"
+"rmm-cu13"                = "26.6.0a30"
+"rapids-logger"           = "0.2.3"
+"libucx-cu13"             = "1.19.0"
+"cupy-cuda13x"            = "14.0.1"
