@@ -38,7 +38,7 @@ The RAPIDS `NATIVE` arch detection on a DGX Spark resolves to SM_121. A Cython e
 A type mismatch in the graph Laplacian computation caused CUDA context corruption on aarch64 systems with CCCL 3.4.0. The issue manifested when computing graph Laplacians with 64-bit index types (`NZType=long`).
 
 #### Root Cause
-The `marked_diagonal` vector was allocated as `device_vector<int>` but consumed by `thrust::exclusive_scan` expecting `device_vector<long>` output. With CCCL 3.4.0, the "warpspeed scan" optimization path is active on SM_121a, which activates this code path and caused writes to incorrect memory addresses, corrupting the CUDA context.
+The `marked_diagonal` vector was allocated as `device_vector<int>` but consumed by `thrust::exclusive_scan` expecting `device_vector<long>` output. With CCCL 3.4.0, the "warpspeed scan" optimization path is active on SM_121 (GB10), which activates this code path and caused writes to incorrect memory addresses, corrupting the CUDA context.
 
 #### Solution
 Changed lines 129-130 in `raft/sparse/linalg/detail/laplacian.cuh`:
@@ -126,9 +126,9 @@ pylibraft-spark-cu13 @ https://github.com/zbrad/raft/releases/download/v26.06.00
 ### Supported Hardware
 
 #### ✅ Primary Support (Verified)
-- **NVIDIA Grace Hopper Architecture**
-  - Compute Capability: SM_121a
-  - Example Hardware: DGX Spark (aarch64)
+- **NVIDIA Grace Blackwell Architecture**
+  - Compute Capability: SM_121
+  - Example Hardware: DGX Spark (NVIDIA GB10, aarch64)
   - CPU: ARM-based Grace CPU
   - Memory: Up to 288GB GPU memory
 
@@ -208,7 +208,7 @@ make -j$(nproc)
 - **Total Tests Run**: 483
 - **Test Status**: ✅ ALL PASSED
 - **Test Suites**: 65
-- **Runtime**: ~514 seconds on Grace Hopper
+- **Runtime**: ~514 seconds on Grace Blackwell (GB10)
 
 ### Test Coverage
 The release includes comprehensive tests for:
@@ -230,8 +230,8 @@ This is a focused maintenance release with no known issues. If you encounter any
 
 ## Performance Considerations
 
-### Grace Hopper Optimization
-The package is optimized for SM_121a (Grace Hopper) with automatic GPU architecture detection during compilation. For best performance:
+### Grace Blackwell Optimization
+The package is optimized for SM_121 (NVIDIA GB10 / Grace Blackwell) with automatic GPU architecture detection during compilation. For best performance:
 
 - Ensure CUDA_ARCH is detected correctly during build
 - Use `-DCMAKE_CUDA_ARCHITECTURES=121a` in CMake for explicit targeting
@@ -240,7 +240,7 @@ The package is optimized for SM_121a (Grace Hopper) with automatic GPU architect
 ### Memory Management
 - RAFT uses RAPIDS Memory Manager (RMM) for efficient GPU memory allocation
 - Supports different allocation strategies (CUDA default, managed memory, etc.)
-- Grace Hopper's up to 288GB unified memory benefits from RMM pooling strategies
+- Grace Blackwell's up to 288GB unified memory benefits from RMM pooling strategies
 
 ## Compatibility
 
@@ -294,7 +294,7 @@ Added `requirements-build-cuda132.txt` with pinned pip dependencies for setting 
 ## What's New in RAFT 26.6
 
 ### Bug Fixes
-- ✅ **Critical**: Fixed Laplacian computation type mismatch (SM_121a, CCCL 3.4.0)
+- ✅ **Critical**: Fixed Laplacian computation type mismatch (SM_121 / GB10, CCCL 3.4.0)
 - ✅ Eliminated CUDA context corruption in sparse Laplacian algorithms
 - ✅ Fixed 64-bit index support in graph algorithms
 - ✅ Fixed `warpReduce` template ambiguity with `raft::add_op` (IVF-PQ build failure)
@@ -317,7 +317,7 @@ Added `requirements-build-cuda132.txt` with pinned pip dependencies for setting 
 | `WarpReduceAddOpTest/.WARP_REDUCE_WITH_ADD_OP` | `cpp/tests/util/reduction.cu` | `warpReduce` disambiguation fix: `raft::add_op` overload preferred over CUB |
 
 ### Validation
-- ✅ Full test suite passes on Grace Hopper (aarch64)
+- ✅ Full test suite passes on Grace Blackwell / GB10 (aarch64)
 - ✅ Verified with multiple matrix sizes and data types
 - ✅ Validated with both CSR and COO sparse formats
 - ✅ warpReduce disambiguation verified on aarch64 + CUDA 13.2
@@ -344,7 +344,7 @@ See [docs/source/build_aarch64_cuda132.md](docs/source/build_aarch64_cuda132.md)
 
 ## Credits
 
-This release addresses a critical issue discovered during validation testing on NVIDIA DGX Spark systems with Grace Hopper GPUs. The fix ensures robust operation of RAFT's sparse algorithms across all supported architectures and CUDA versions.
+This release addresses a critical issue discovered during validation testing on NVIDIA DGX Spark systems with Grace Blackwell (GB10) GPUs. The fix ensures robust operation of RAFT's sparse algorithms across all supported architectures and CUDA versions.
 
 ---
 

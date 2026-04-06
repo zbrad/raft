@@ -68,8 +68,8 @@ For detailed instructions, see `INSTALL_GUIDE_26.6_aarch64.md`
 ## 📊 Hardware Support
 
 ### ✅ Primary Support
-- **NVIDIA Grace Hopper** (DGX Spark)
-  - Compute Capability: SM_121a
+- **NVIDIA Grace Blackwell** (GB10 / DGX Spark)
+  - Compute Capability: SM_121
   - Architecture: aarch64
   - Memory: Up to 288GB GPU memory
 
@@ -104,7 +104,7 @@ rmm/                   - Memory manager headers
 - **Tests Run**: 483
 - **Suites**: 65
 - **Status**: ✅ ALL PASSED
-- **Runtime**: ~514 seconds on Grace Hopper
+- **Runtime**: ~514 seconds on Grace Blackwell (GB10)
 
 **Key Tests**:
 - ✅ ComputeGraphLaplacianTest (GraphWithoutSelfLoop, GraphWithSelfLoop)
@@ -156,7 +156,7 @@ MD5:    194e4f4b29af97b897d44cda2de7b145
 | Component | Requirement |
 |-----------|-------------|
 | **CPU Architecture** | aarch64 (ARM-based) |
-| **GPU Architecture** | SM_121a (Grace Hopper) recommended |
+| **GPU Architecture** | SM_121 (NVIDIA GB10 / Grace Blackwell) recommended |
 | **CUDA Toolkit** | 13.2+ |
 | **CCCL** | 3.4.0+ |
 | **GCC/Clang** | 13.3.0+ |
@@ -170,7 +170,7 @@ MD5:    194e4f4b29af97b897d44cda2de7b145
 - ✅ Full 64-bit index support in sparse algorithms
 
 ### Verified On
-- ✅ NVIDIA DGX Spark with Grace Hopper GPUs
+- ✅ NVIDIA DGX Spark with Grace Blackwell (GB10) GPUs
 - ✅ CUDA 13.2.51
 - ✅ CCCL 3.4.0
 - ✅ GCC 13.3.0

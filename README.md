@@ -267,7 +267,7 @@ python3 -m pip install cmake ninja sphinx pytest scipy scikit-learn cython
 # Libraries will be installed to: cpp/build/install/lib/
 ```
 
-#### CUDA 13.2+ on aarch64 (Grace Hopper)
+#### CUDA 13.2+ on aarch64 (Grace Blackwell / GB10)
 
 For ARM-based systems with CUDA 13.2 and Python 3.14+, see [Building on aarch64 with CUDA 13.2](./docs/source/build_aarch64_cuda132.md):
 

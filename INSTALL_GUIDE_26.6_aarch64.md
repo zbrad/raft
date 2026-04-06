@@ -1,6 +1,6 @@
 # RAFT 26.6 Quick Installation Guide
 
-**For aarch64 systems with NVIDIA Grace Hopper GPUs and CUDA 13.2**
+**For aarch64 systems with NVIDIA Grace Blackwell GPUs (GB10 / DGX Spark) and CUDA 13.2**
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Verify your system meets these requirements:
 # Check CUDA version (must be 13.2+)
 nvcc --version
 
-# Check GPU architecture (should show SM 121a for Grace Hopper)
+# Check GPU architecture (should show 12.1 for Grace Blackwell / GB10)
 nvidia-smi --query-gpu=compute_cap --format=csv
 
 # Check CPU architecture (must be aarch64)
@@ -246,6 +246,6 @@ Encountering issues? Check:
 ---
 
 **Release**: RAFT 26.6  
-**Platform**: aarch64 (Grace Hopper)  
+**Platform**: aarch64 (NVIDIA GB10 / DGX Spark)
 **CUDA**: 13.2+  
 **Package**: raft-26.6-aarch64-cuda132.tar.bz2

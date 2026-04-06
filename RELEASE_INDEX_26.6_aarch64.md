@@ -189,7 +189,7 @@ Total Time: ~20-30 minutes
 **See**: RELEASE_NOTES_26.6.md (section "Critical Fix")
 
 ### Hardware Support
-- ✅ **Grace Hopper** (SM_121a, aarch64) - Primary support
+- ✅ **Grace Blackwell** (GB10 / DGX Spark, SM_121, aarch64) - Primary support
 - ✅ Other aarch64 systems with NVIDIA GPUs
 - ❌ x86-64 systems (continue with RAFT 26.04)
 
@@ -233,7 +233,7 @@ Before using this release, verify:
 
 - [ ] System is aarch64 architecture (`uname -m` returns aarch64)
 - [ ] CUDA 13.2+ is installed (`nvcc --version` shows 13.2+)
-- [ ] GPU is Grace Hopper (`nvidia-smi --query-gpu=compute_cap` shows 12.1)
+- [ ] GPU is Grace Blackwell GB10 (`nvidia-smi --query-gpu=compute_cap` shows 12.1)
 - [ ] CMake 3.26.4+ available (`cmake --version`)
 - [ ] C++ compiler available (GCC 13.3.0+ preferred)
 
@@ -276,7 +276,7 @@ In the RAFT repository:
 | GCC (tested) | 13.3.0 |
 | CMake (tested) | 3.30.4 |
 | Architecture | aarch64 |
-| GPU Arch | SM_121a |
+| GPU Arch | SM_121 |
 
 ---
 
@@ -302,6 +302,6 @@ Option D: I want to verify the package
 
 **RAFT 26.6 Release**  
 March 31, 2026  
-Platform: aarch64 (Grace Hopper)  
+Platform: aarch64 (NVIDIA GB10 / DGX Spark)
 CUDA: 13.2+  
 Status: ✅ Ready for production use
