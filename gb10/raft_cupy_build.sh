@@ -1,10 +1,10 @@
 #!/bin/bash
 # raft_cupy_build.sh — Build a CUDA-arch-specific cupy wheel for the DGX Spark
-# stack (SM_121 / aarch64 / CUDA 13.2) and place it in dist/gb10/.
+# stack (SM_121a / aarch64 / CUDA 13.2) and place it in dist/gb10/.
 #
 # ── Why build from source instead of the PyPI wheel? ─────────────────────────
 # The official cupy-cuda13x PyPI wheel bundles pre-compiled SASS for every
-# NVIDIA GPU arch, making it ~73 MB compressed.  Targeting SM_121 only
+# NVIDIA GPU arch, making it ~73 MB compressed.  Targeting SM_121a only
 # produces a ~10-20 MB wheel — important for release asset size and deployment
 # footprint, especially on embedded platforms like DGX Spark.
 #
@@ -28,7 +28,7 @@
 #
 # Environment variables honoured:
 #   CUPY_VERSION         default: 14.0.1
-#   CUDA_ARCH            default: 121  (SM_121 = DGX Spark / GB10)
+#   CUDA_ARCH            default: 121a  (SM_121a = DGX Spark / GB10)
 #   DIST_DIR             default: <repo>/dist/gb10
 #   CUPY_NUM_BUILD_JOBS  default: $(nproc)
 #   CUPY_NUM_NVCC_THREADS default: 2
@@ -40,14 +40,15 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/gb10/raft_env_gb10.sh" || exit 1
 
 CUPY_VERSION="${CUPY_VERSION:-14.0.1}"
-CUDA_ARCH="${CUDA_ARCH:-121}"
+CUDA_ARCH="${CUDA_ARCH:-${GB10_CUDA_ARCH}}"
 DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/gb10}"
 JOBS="${CUPY_NUM_BUILD_JOBS:-$(nproc)}"
 NVCC_THREADS="${CUPY_NUM_NVCC_THREADS:-2}"
 
-# SM_121 uses compute_121 virtual arch and sm_121 real arch.
-# For SM_120 (RTX 50xx) the virtual arch is compute_120, real arch sm_120 —
-# see wsl/raft_cupy_build_rtx50xx.sh for that variant.
+# SM_121a uses compute_121a virtual arch and sm_121a real arch (the "a" selects
+# Blackwell family-specific instructions -- see gb10/raft_env_gb10.sh for why).
+# For SM_120 (RTX 50xx) the virtual arch is compute_120, real arch sm_120 (no
+# "a", consumer silicon) — see wsl/raft_cupy_build_rtx50xx.sh for that variant.
 CUPY_NVCC_GENERATE_CODE="arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}"
 
 mkdir -p "${DIST_DIR}"

@@ -6,4 +6,6 @@ ARCH="$(uname -m)"
 # shellcheck source=raft_env_gb10.sh
 source "${PROJECT_ROOT}/gb10/raft_env_gb10.sh" || exit 1
 cd "${PROJECT_ROOT}"
-LIBRAFT_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}" bash build.sh libraft tests --compile-lib --cache-tool=ccache '--cmake-args="-DCMAKE_CUDA_ARCHITECTURES=121a"'
+LIBRAFT_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GB10_CUDA_ARCH}\""
+
+verify_gb10_arch "${PROJECT_ROOT}/cpp/build-${ARCH}/libraft.so" || exit 1

@@ -1,12 +1,12 @@
 #!/bin/bash
 # raft_container_gb10.sh — Build, smoke-test, and optionally gtest the
-# cuda13.2-pip-spark devcontainer image for DGX Spark (SM_121 / aarch64 / CUDA 13.2).
+# cuda13.2-pip-spark devcontainer image for DGX Spark (SM_121a / aarch64 / CUDA 13.2).
 #
 # Usage:
 #   bash gb10/raft_container_gb10.sh           # all phases: build → smoke → test → pytest
 #   bash gb10/raft_container_gb10.sh --build   # build image only
 #   bash gb10/raft_container_gb10.sh --smoke   # smoke test only (no GPU needed)
-#   bash gb10/raft_container_gb10.sh --test    # gtest only (requires SM_121 GPU)
+#   bash gb10/raft_container_gb10.sh --test    # gtest only (requires SM_121a GPU)
 #   bash gb10/raft_container_gb10.sh --pytest  # Python tests via pylibraft-gb10-cu13 wheel
 #
 # Environment variables:
@@ -19,7 +19,7 @@
 # wheels.  By default it auto-downloads the PyPI binaries (~73 MB cupy + ~33 MB
 # scipy) if they are not already cached there.
 #
-# For a smaller arch-specific cupy wheel (~10-20 MB, SM_121 only), build from
+# For a smaller arch-specific cupy wheel (~10-20 MB, SM_121a only), build from
 # source first:
 #   bash gb10/raft_cupy_build.sh         # outputs cupy_cuda13x-*.whl to dist/gb10/
 #   pip download --no-deps scipy -d dist/gb10/
@@ -34,7 +34,9 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVCONTAINER_CONFIG="${PROJECT_ROOT}/.devcontainer/cuda13.2-pip-spark/devcontainer.json"
 IMAGE_TAG="${IMAGE_TAG:-raft-cuda13.2-pip-spark:26.06}"
-CUDA_ARCH="121"
+# Must match GB10_CUDA_ARCH in gb10/raft_env_gb10.sh (not sourced here since
+# this script only drives docker and needs no local CUDA toolkit).
+CUDA_ARCH="121a"
 
 # ── parse flags ────────────────────────────────────────────────────────────────
 DO_BUILD=0
@@ -139,7 +141,7 @@ check_warn() {
 }
 
 # ── image-level checks (hard failures) ──────────────────────────────────────
-check_eq "CUDAARCHS"              "121"  "${CUDAARCHS:-}"
+check_eq "CUDAARCHS"              "121a" "${CUDAARCHS:-}"
 check_eq "PYTHON_PACKAGE_MANAGER" "pip"  "${PYTHON_PACKAGE_MANAGER:-}"
 check    "nvcc present"           which nvcc
 check    "nvcc executes"          nvcc --version
@@ -186,7 +188,7 @@ SMOKE
 phase_test() {
     echo ""
     echo "════════════════════════════════════════════════════════════════"
-    echo "  PHASE 3 — gtest suite (requires SM_121 GPU)"
+    echo "  PHASE 3 — gtest suite (requires SM_121a GPU)"
     echo "  Image:   ${IMAGE_TAG}"
     echo "════════════════════════════════════════════════════════════════"
 
@@ -198,12 +200,12 @@ phase_test() {
     # Verify GPU access
     if ! docker run --rm --gpus all "${IMAGE_TAG}" nvidia-smi -L &>/dev/null; then
         echo "  WARNING: No GPU available via --gpus all. Skipping gtest phase."
-        echo "           To run on a machine with SM_121 hardware, re-run with --test."
+        echo "           To run on a machine with SM_121a hardware, re-run with --test."
         return 0
     fi
 
     # The gtest phase runs pre-built binaries from the host's build dir inside
-    # the container. This validates that SM_121 binaries execute correctly in
+    # the container. This validates that SM_121a binaries execute correctly in
     # the containerised environment without needing internet or a full rebuild.
     ARCH="$(uname -m)"
     HOST_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}"
@@ -239,7 +241,7 @@ phase_test() {
 phase_pytest() {
     echo ""
     echo "════════════════════════════════════════════════════════════════"
-    echo "  PHASE 4 — Python tests (pylibraft-gb10-cu13, requires SM_121 GPU)"
+    echo "  PHASE 4 — Python tests (pylibraft-gb10-cu13, requires SM_121a GPU)"
     echo "  Image:   ${IMAGE_TAG}"
     echo "════════════════════════════════════════════════════════════════"
 
@@ -270,7 +272,7 @@ phase_pytest() {
         pip download --quiet --no-deps cupy-cuda13x scipy -d "${DIST_DIR}"
     fi
     # Preference order for cupy wheel:
-    #   1. cupy-*.whl        — source-built SM_121-only (gb10/raft_cupy_build.sh), ~36 MB
+    #   1. cupy-*.whl        — source-built SM_121a-only (gb10/raft_cupy_build.sh), ~36 MB
     #   2. cupy_cuda13x-*.whl — PyPI binary w/ all arches (auto-downloaded below), ~73 MB
     # Note: pip validates that the dist-info name matches the wheel filename, so the
     # source-built wheel keeps its 'cupy' package name.  The stack is identified by

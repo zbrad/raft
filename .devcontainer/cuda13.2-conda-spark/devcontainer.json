@@ -1,5 +1,5 @@
 {
-  "name": "RAFT 26.06 — CUDA 13.2 / conda / DGX Spark (SM_121)",
+  "name": "RAFT 26.06 — CUDA 13.2 / conda / DGX Spark (SM_121a)",
   "build": {
     "context": "${localWorkspaceFolder}/.devcontainer",
     "dockerfile": "${localWorkspaceFolder}/.devcontainer/Dockerfile",
@@ -17,7 +17,7 @@
     "nofile=500000"
   ],
   "containerEnv": {
-    "CUDAARCHS": "121"
+    "CUDAARCHS": "121a"
   },
   "hostRequirements": {"gpu": "optional"},
   "features": {

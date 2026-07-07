@@ -6,6 +6,38 @@
 #   CUDA_HOME      — root of the active CUDA toolkit (e.g. /usr/local/cuda-13.3)
 #   CUDA_VERSION   — full dotted version   (e.g. 13.3)
 #   CUDA_VERSION_COMPACT — digits only     (e.g. 133)
+#   GB10_CUDA_ARCH — the one true CUDA arch string for GB10 builds: "121a"
+#
+# ── Rule: GB10 must target sm_121a, not bare sm_121 ─────────────────────────
+# The trailing "a" selects the Blackwell family-specific ("accelerated") ISA
+# extensions -- e.g. the newer tensor-core instructions -- that are exposed on
+# datacenter-class Blackwell silicon but are absent from the generic sm_121
+# target. GB10 (Grace Blackwell, DGX Spark) is datacenter-class, so it needs
+# the "a" variant. This is the opposite of RTX 50xx (consumer Blackwell),
+# which must use bare sm_120 (no "a") -- see wsl/raft_cupy_build_rtx50xx.sh.
+# Every gb10/* script must derive its CUDA arch from GB10_CUDA_ARCH rather
+# than hardcoding "121a"/"121" so this can't drift again.
+GB10_CUDA_ARCH="121a"
+export GB10_CUDA_ARCH
+
+# verify_gb10_arch <path-to-.so> — assert a compiled library's embedded
+# cubins are exactly sm_121a (via cuobjdump), catching a build silently
+# produced against the wrong CMAKE_CUDA_ARCHITECTURES (e.g. a stale build
+# directory left over from an RTX 50xx / bare-121 build).
+verify_gb10_arch() {
+    local so_file="$1"
+    if [[ ! -f "${so_file}" ]]; then
+        echo "ERROR: verify_gb10_arch: no such file: ${so_file}" >&2
+        return 1
+    fi
+    local found
+    found="$(cuobjdump --list-elf "${so_file}" 2>/dev/null | grep -oE 'sm_[0-9]+a?' | sort -u)"
+    if [[ "${found}" != "sm_${GB10_CUDA_ARCH}" ]]; then
+        echo "ERROR: ${so_file} is not built for sm_${GB10_CUDA_ARCH} (found: ${found:-none})" >&2
+        return 1
+    fi
+    echo "Verified: ${so_file} is built for sm_${GB10_CUDA_ARCH}"
+}
 #
 # Detection order:
 #   1. An explicit caller-supplied CUDA_HOME is always honoured as-is.

@@ -19,6 +19,6 @@ RELEASE_NOTES_FILE="RELEASE_NOTES_26.6_${ARCH}.md"
 gh release create "${RELEASE_TAG}" --repo zbrad/raft \
   "${PKG_NAME}.tar.bz2#RAFT 26.6 ${ARCH} CUDA ${CUDA_VERSION} binary package" \
   "${CHECKSUMS_FILE}#${CHECKSUMS_FILE}" \
-  --title "RAFT 26.6 — ${ARCH} / CUDA ${CUDA_VERSION} / SM_121" \
+  --title "RAFT 26.6 — ${ARCH} / CUDA ${CUDA_VERSION} / SM_${GB10_CUDA_ARCH}" \
   --notes-file "${RELEASE_NOTES_FILE}" \
   --target "gb10"
