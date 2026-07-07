@@ -1,18 +1,18 @@
 #!/bin/bash
-# raft_container_spark.sh — Build, smoke-test, and optionally gtest the
+# raft_container_gb10.sh — Build, smoke-test, and optionally gtest the
 # cuda13.2-pip-spark devcontainer image for DGX Spark (SM_121 / aarch64 / CUDA 13.2).
 #
 # Usage:
-#   bash spark/raft_container_spark.sh           # all phases: build → smoke → test → pytest
-#   bash spark/raft_container_spark.sh --build   # build image only
-#   bash spark/raft_container_spark.sh --smoke   # smoke test only (no GPU needed)
-#   bash spark/raft_container_spark.sh --test    # gtest only (requires SM_121 GPU)
-#   bash spark/raft_container_spark.sh --pytest  # Python tests via pylibraft-spark-cu13 wheel
+#   bash gb10/raft_container_gb10.sh           # all phases: build → smoke → test → pytest
+#   bash gb10/raft_container_gb10.sh --build   # build image only
+#   bash gb10/raft_container_gb10.sh --smoke   # smoke test only (no GPU needed)
+#   bash gb10/raft_container_gb10.sh --test    # gtest only (requires SM_121 GPU)
+#   bash gb10/raft_container_gb10.sh --pytest  # Python tests via pylibraft-gb10-cu13 wheel
 #
 # Environment variables:
 #   SKIP_GPU_TEST=1   Skip gtest and pytest phases even when --test/--pytest are passed.
 #   IMAGE_TAG         Override the output image tag (default: raft-cuda13.2-pip-spark:26.06).
-#   DIST_DIR          Path to directory containing the spark wheels (default: <repo>/dist/spark).
+#   DIST_DIR          Path to directory containing the gb10 wheels (default: <repo>/dist/gb10).
 #
 # ── Test dependencies: cupy and scipy ────────────────────────────────────────
 # The pytest phase requires cupy-cuda13x and scipy in DIST_DIR alongside the raft
@@ -21,13 +21,13 @@
 #
 # For a smaller arch-specific cupy wheel (~10-20 MB, SM_121 only), build from
 # source first:
-#   bash spark/raft_cupy_build.sh        # outputs cupy_cuda13x-*.whl to dist/spark/
-#   pip download --no-deps scipy -d dist/spark/
+#   bash gb10/raft_cupy_build.sh         # outputs cupy_cuda13x-*.whl to dist/gb10/
+#   pip download --no-deps scipy -d dist/gb10/
 # Then re-run --pytest; it will pick up the local wheels automatically.
 #
 # scipy is required not just for testing but at runtime by cupyx.scipy.sparse
 # (cupy's GPU sparse linear-algebra module).  Always distribute cupy and scipy
-# together.  See spark/raft_cupy_build.sh for the full explanation.
+# together.  See gb10/raft_cupy_build.sh for the full explanation.
 
 set -euo pipefail
 
@@ -212,7 +212,7 @@ phase_test() {
     if [[ ! -f "${HOST_BUILD_DIR}/gtests/UTILS_TEST" ]] || \
        [[ ! -f "${HOST_BUILD_DIR}/gtests/LINALG_TEST" ]]; then
         echo "  WARNING: Pre-built gtests not found at ${HOST_BUILD_DIR}/gtests/"
-        echo "           Run 'bash spark/raft_build_spark.sh' on the host first, then re-run --test."
+        echo "           Run 'bash gb10/raft_build_gb10.sh' on the host first, then re-run --test."
         return 0
     fi
 
@@ -235,11 +235,11 @@ phase_test() {
     echo "gtest suite passed."
 }
 
-# ── phase 4: Python tests via pylibraft-spark-cu13 wheel ─────────────────────
+# ── phase 4: Python tests via pylibraft-gb10-cu13 wheel ──────────────────────
 phase_pytest() {
     echo ""
     echo "════════════════════════════════════════════════════════════════"
-    echo "  PHASE 4 — Python tests (pylibraft-spark-cu13, requires SM_121 GPU)"
+    echo "  PHASE 4 — Python tests (pylibraft-gb10-cu13, requires SM_121 GPU)"
     echo "  Image:   ${IMAGE_TAG}"
     echo "════════════════════════════════════════════════════════════════"
 
@@ -248,21 +248,21 @@ phase_pytest() {
         return 0
     fi
 
-    DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/spark}"
-    LIBRAFT_WHL="$(ls "${DIST_DIR}"/libraft_cu13-*.whl 2>/dev/null | head -1)"
-    PYLIBRAFT_WHL="$(ls "${DIST_DIR}"/pylibraft_spark_cu13-*.whl 2>/dev/null | head -1)"
+    DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/gb10}"
+    LIBRAFT_WHL="$(ls "${DIST_DIR}"/libraft_gb10_cu13-*.whl 2>/dev/null | head -1)"
+    PYLIBRAFT_WHL="$(ls "${DIST_DIR}"/pylibraft_gb10_cu13-*.whl 2>/dev/null | head -1)"
 
     if [[ -z "${LIBRAFT_WHL}" ]] || [[ -z "${PYLIBRAFT_WHL}" ]]; then
-        echo "  WARNING: pylibraft-spark-cu13 wheels not found in ${DIST_DIR}."
-        echo "           Run 'bash spark/raft_wheel_spark.sh' first to build them."
+        echo "  WARNING: pylibraft-gb10-cu13 wheels not found in ${DIST_DIR}."
+        echo "           Run 'bash gb10/raft_wheel_gb10.sh' first to build them."
         return 0
     fi
     echo "  libraft wheel:   $(basename "${LIBRAFT_WHL}")"
     echo "  pylibraft wheel: $(basename "${PYLIBRAFT_WHL}")"
 
-    # Ensure test-only deps (cupy, scipy) are cached in dist/spark so
+    # Ensure test-only deps (cupy, scipy) are cached in dist/gb10 so
     # the container never needs outbound PyPI access during the test phase.
-    # Prefer a source-built arch-specific wheel (spark/raft_cupy_build.sh) if
+    # Prefer a source-built arch-specific wheel (gb10/raft_cupy_build.sh) if
     # present; fall back to downloading the PyPI binary.
     if ! ls "${DIST_DIR}"/cupy-*.whl &>/dev/null && ! ls "${DIST_DIR}"/cupy_cuda13x-*.whl &>/dev/null || \
        ! ls "${DIST_DIR}"/scipy-*.whl &>/dev/null; then
@@ -270,11 +270,11 @@ phase_pytest() {
         pip download --quiet --no-deps cupy-cuda13x scipy -d "${DIST_DIR}"
     fi
     # Preference order for cupy wheel:
-    #   1. cupy-*.whl        — source-built SM_121-only (spark/raft_cupy_build.sh), ~36 MB
+    #   1. cupy-*.whl        — source-built SM_121-only (gb10/raft_cupy_build.sh), ~36 MB
     #   2. cupy_cuda13x-*.whl — PyPI binary w/ all arches (auto-downloaded below), ~73 MB
     # Note: pip validates that the dist-info name matches the wheel filename, so the
     # source-built wheel keeps its 'cupy' package name.  The stack is identified by
-    # its location in dist/spark/ — not its filename.
+    # its location in dist/gb10/ — not its filename.
     CUPY_WHL="$(ls "${DIST_DIR}"/cupy-*.whl 2>/dev/null | head -1)"
     if [[ -z "${CUPY_WHL}" ]]; then
         CUPY_WHL="$(ls "${DIST_DIR}"/cupy_cuda13x-*.whl 2>/dev/null | head -1)"
@@ -293,7 +293,7 @@ phase_pytest() {
     PYLIBRAFT_WHL_BASE="$(basename "${PYLIBRAFT_WHL}")"
     CUPY_WHL_BASE="$(basename "${CUPY_WHL}")"
     SCIPY_WHL_BASE="$(basename "${SCIPY_WHL}")"
-    CONTAINER_DIST="/tmp/spark-wheels"
+    CONTAINER_DIST="/tmp/gb10-wheels"
 
     docker run --rm \
         --gpus all \
@@ -306,7 +306,7 @@ phase_pytest() {
         bash -c "
             set -euo pipefail
 
-            # Require Python >= 3.14 (cuda-python 13.x and pylibraft-spark-cu13 abi3
+            # Require Python >= 3.14 (cuda-python 13.x and pylibraft-gb10-cu13 abi3
             # wheels are built against CP311 but the DGX Spark runtime is 3.14; older
             # versions may silently load wrong ABI or fail to import CUDA extensions).
             PY_MAJOR=\$(python3 -c 'import sys; print(sys.version_info.major)')
@@ -317,7 +317,7 @@ phase_pytest() {
             fi
             echo \"Python \${PY_MAJOR}.\${PY_MINOR} — OK\"
 
-            echo '--- Installing spark wheels and runtime deps ---'
+            echo '--- Installing gb10 wheels and runtime deps ---'
             pip install --quiet \
                 --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
                 pytest \
@@ -327,7 +327,7 @@ phase_pytest() {
                 '${CONTAINER_DIST}/${LIBRAFT_WHL_BASE}' \
                 '${CONTAINER_DIST}/${PYLIBRAFT_WHL_BASE}'
             echo '--- Installed packages ---'
-            pip show libraft-cu13 pylibraft-spark-cu13
+            pip show libraft-gb10-cu13 pylibraft-gb10-cu13
             echo '--- Running pylibraft tests ---'
             cd /home/coder/raft/python/pylibraft/pylibraft
             # test_doctests.py — docstring examples contain env-specific output

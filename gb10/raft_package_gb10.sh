@@ -2,8 +2,8 @@
 export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARCH="$(uname -m)"# shellcheck source=raft_env_spark.sh
-source "${PROJECT_ROOT}/spark/raft_env_spark.sh" || exit 1INSTALL_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}/install"
+ARCH="$(uname -m)"# shellcheck source=raft_env_gb10.sh
+source "${PROJECT_ROOT}/gb10/raft_env_gb10.sh" || exit 1INSTALL_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}/install"
 PKG_NAME=raft-26.6-${ARCH}-cuda${CUDA_VERSION_COMPACT}
 PKG_DIR=/tmp/${PKG_NAME}
 OUT="${PROJECT_ROOT}/${PKG_NAME}.tar.bz2"

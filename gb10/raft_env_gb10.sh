@@ -1,5 +1,5 @@
 #!/bin/bash
-# raft_env_spark.sh — detect CUDA installation and export common env vars.
+# raft_env_gb10.sh — detect CUDA installation and export common env vars.
 # Source this file; do not execute it directly.
 #
 # Exported variables:
@@ -45,3 +45,14 @@ case ":${PATH}:" in
 esac
 
 echo "CUDA_HOME=${CUDA_HOME}  CUDA_VERSION=${CUDA_VERSION}  CUDA_VERSION_COMPACT=${CUDA_VERSION_COMPACT}"
+
+# Surface every installed toolkit, and warn (don't fail) if the one we
+# auto-detected isn't the only one present -- this silently bit us once
+# already: an earlier build picked up CUDA 13.2 by default while 13.3 was
+# also installed, and the mismatch wasn't caught until a much later stage.
+mapfile -t _ALL_CUDA_TOOLKITS < <(compgen -G "/usr/local/cuda-*" | sort -V)
+if (( ${#_ALL_CUDA_TOOLKITS[@]} > 1 )); then
+    echo "WARNING: multiple CUDA toolkits installed: ${_ALL_CUDA_TOOLKITS[*]}"
+    echo "         using CUDA_HOME=${CUDA_HOME} -- set CUDA_HOME explicitly if this isn't the one you want."
+fi
+unset _ALL_CUDA_TOOLKITS

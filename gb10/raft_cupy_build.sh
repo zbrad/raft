@@ -1,6 +1,6 @@
 #!/bin/bash
 # raft_cupy_build.sh — Build a CUDA-arch-specific cupy wheel for the DGX Spark
-# stack (SM_121 / aarch64 / CUDA 13.2) and place it in dist/spark/.
+# stack (SM_121 / aarch64 / CUDA 13.2) and place it in dist/gb10/.
 #
 # ── Why build from source instead of the PyPI wheel? ─────────────────────────
 # The official cupy-cuda13x PyPI wheel bundles pre-compiled SASS for every
@@ -21,27 +21,27 @@
 #   wsl/raft_cupy_build_rtx50xx.sh    — RTX 50xx  (SM_120, x86_64, CUDA 13.2)
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
-#   bash spark/raft_cupy_build.sh              # default version + output dir
-#   CUPY_VERSION=14.0.1 bash spark/...         # pin a specific cupy version
-#   DIST_DIR=/path/to/out bash spark/...       # override output directory
-#   CUPY_NUM_BUILD_JOBS=16 bash spark/...      # parallel C++ compile jobs
+#   bash gb10/raft_cupy_build.sh               # default version + output dir
+#   CUPY_VERSION=14.0.1 bash gb10/...          # pin a specific cupy version
+#   DIST_DIR=/path/to/out bash gb10/...        # override output directory
+#   CUPY_NUM_BUILD_JOBS=16 bash gb10/...       # parallel C++ compile jobs
 #
 # Environment variables honoured:
 #   CUPY_VERSION         default: 14.0.1
 #   CUDA_ARCH            default: 121  (SM_121 = DGX Spark / GB10)
-#   DIST_DIR             default: <repo>/dist/spark
+#   DIST_DIR             default: <repo>/dist/gb10
 #   CUPY_NUM_BUILD_JOBS  default: $(nproc)
 #   CUPY_NUM_NVCC_THREADS default: 2
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=raft_env_spark.sh
-source "${PROJECT_ROOT}/spark/raft_env_spark.sh" || exit 1
+# shellcheck source=raft_env_gb10.sh
+source "${PROJECT_ROOT}/gb10/raft_env_gb10.sh" || exit 1
 
 CUPY_VERSION="${CUPY_VERSION:-14.0.1}"
 CUDA_ARCH="${CUDA_ARCH:-121}"
-DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/spark}"
+DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/gb10}"
 JOBS="${CUPY_NUM_BUILD_JOBS:-$(nproc)}"
 NVCC_THREADS="${CUPY_NUM_NVCC_THREADS:-2}"
 
@@ -65,7 +65,7 @@ echo "════════════════════════�
 # Remove any stale cupy wheel for this version so the output is deterministic.
 # Source-built wheel is named 'cupy-VERSION-...' (package name 'cupy'), whereas
 # the PyPI binary download is 'cupy_cuda13x-VERSION-...' — both are handled by
-# the glob in raft_container_spark.sh.
+# the glob in raft_container_gb10.sh.
 rm -f "${DIST_DIR}"/cupy-${CUPY_VERSION}-*.whl \
       "${DIST_DIR}"/cupy_cuda13x-${CUPY_VERSION}-*.whl
 
@@ -90,6 +90,6 @@ echo ""
 echo "  NOTE: Always distribute and install cupy alongside scipy."
 echo "        cupyx.scipy.sparse requires scipy at runtime — not just for tests."
 echo "        Run: pip download --no-deps scipy -d ${DIST_DIR}"
-echo "        or:  bash spark/raft_wheel_spark.sh  (includes scipy download)"
+echo "        or:  bash gb10/raft_wheel_gb10.sh  (includes scipy download)"
 echo ""
 echo "Done."

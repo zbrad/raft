@@ -9,11 +9,11 @@
 # ── cupy and scipy are a pair ─────────────────────────────────────────────────
 # cupyx.scipy.sparse requires scipy at *runtime* for CPU↔GPU sparse matrix
 # conversions — not just for testing.  Always distribute and install cupy and
-# scipy together.  See spark/raft_cupy_build.sh for the full explanation.
+# scipy together.  See gb10/raft_cupy_build.sh for the full explanation.
 # Reference: https://docs.cupy.dev/en/stable/install.html#python-dependencies
 #
 # ── Analogous scripts for other stacks ────────────────────────────────────────
-#   spark/raft_cupy_build.sh           — DGX Spark (SM_121,  aarch64, CUDA 13.2)
+#   gb10/raft_cupy_build.sh            — DGX Spark (SM_121,  aarch64, CUDA 13.2)
 #   wsl/raft_cupy_build_rtx50xx.sh     — RTX 50xx  (SM_120, x86_64,  CUDA 13.2)
 #
 # ── NOTE: untested — run on an x86_64 host with RTX 40xx + CUDA 13.2 ─────────
@@ -35,7 +35,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Detect CUDA inline (wsl scripts don't source raft_env_spark.sh).
+# Detect CUDA inline (wsl scripts don't source raft_env_gb10.sh).
 export PATH="${PATH}:/usr/local/cuda-13.2/bin:/usr/local/cuda/bin"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.2}"
 if [[ ! -x "${CUDA_HOME}/bin/nvcc" ]] && command -v nvcc &>/dev/null; then
