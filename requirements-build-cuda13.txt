@@ -1,8 +1,12 @@
-# Python build requirements for RAFT on aarch64 + CUDA 13.2 (DGX Spark)
-# Verified on Python 3.14.3 / NVIDIA GB10 (SM_121) / CUDA 13.2.51 — 2026-04-06
+# Python build requirements for RAFT on any CUDA 13.x toolkit (aarch64 DGX
+# Spark / GB10, and x86_64 RTX 40xx / RTX 50xx). Renamed from
+# requirements-build-cuda132.txt: nothing in here is pinned to a specific
+# CUDA *minor* version -- gb10/rtx40xx/rtx50xx's raft_env_*.sh scripts all
+# auto-detect and build against the highest installed toolkit (13.2, 13.3,
+# ...), so a filename naming one specific minor version was misleading.
 #
 # Install with:
-#   pip install -r requirements-build-cuda132.txt \
+#   pip install -r requirements-build-cuda13.txt \
 #     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
 
 --extra-index-url=https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
