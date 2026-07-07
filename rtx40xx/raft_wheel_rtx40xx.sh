@@ -24,7 +24,7 @@ DIST_DIR="${PROJECT_ROOT}/dist/rtx40xx"
 echo "Installing build dependencies..."
 pip install \
     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
-    -r "${PROJECT_ROOT}/requirements-build-cuda13.txt"
+    -r "${PROJECT_ROOT}/requirements-build-cuda13x.txt"
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}"

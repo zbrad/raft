@@ -4,9 +4,11 @@
 # CUDA *minor* version -- gb10/rtx40xx/rtx50xx's raft_env_*.sh scripts all
 # auto-detect and build against the highest installed toolkit (13.2, 13.3,
 # ...), so a filename naming one specific minor version was misleading.
+# "13x" (not bare "13") matches this repo's existing cupy-cuda13x convention
+# for "any CUDA 13.x minor version".
 #
 # Install with:
-#   pip install -r requirements-build-cuda13.txt \
+#   pip install -r requirements-build-cuda13x.txt \
 #     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
 
 --extra-index-url=https://pypi.anaconda.org/rapidsai-wheels-nightly/simple

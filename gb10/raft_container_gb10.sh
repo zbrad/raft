@@ -325,7 +325,7 @@ phase_pytest() {
                 pytest \
                 '${CONTAINER_DIST}/${CUPY_WHL_BASE}' \
                 '${CONTAINER_DIST}/${SCIPY_WHL_BASE}' \
-                -r /home/coder/raft/requirements-build-cuda13.txt \
+                -r /home/coder/raft/requirements-build-cuda13x.txt \
                 '${CONTAINER_DIST}/${LIBRAFT_WHL_BASE}' \
                 '${CONTAINER_DIST}/${PYLIBRAFT_WHL_BASE}'
             echo '--- Installed packages ---'
