@@ -74,7 +74,7 @@ CUDA_PATH="${CUDA_HOME}" \
         "cupy==${CUPY_VERSION}" \
         -w "${DIST_DIR}"
 
-WHEEL="$(ls "${DIST_DIR}"/cupy-${CUPY_VERSION}-*.whl 2>/dev/null | head -1)"
+WHEEL="$(ls "${DIST_DIR}"/cupy-${CUPY_VERSION}-*.whl 2>/dev/null | head -1)" || true
 [[ -z "${WHEEL}" ]] && { echo "ERROR: cupy wheel not found after build." >&2; exit 1; }
 
 SIZE="$(du -sh "${WHEEL}" | awk '{print $1}')"

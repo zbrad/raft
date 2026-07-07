@@ -251,8 +251,8 @@ phase_pytest() {
     fi
 
     DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/gb10}"
-    LIBRAFT_WHL="$(ls "${DIST_DIR}"/libraft_gb10_cu13-*.whl 2>/dev/null | head -1)"
-    PYLIBRAFT_WHL="$(ls "${DIST_DIR}"/pylibraft_gb10_cu13-*.whl 2>/dev/null | head -1)"
+    LIBRAFT_WHL="$(ls "${DIST_DIR}"/libraft_gb10_cu13-*.whl 2>/dev/null | head -1)" || true
+    PYLIBRAFT_WHL="$(ls "${DIST_DIR}"/pylibraft_gb10_cu13-*.whl 2>/dev/null | head -1)" || true
 
     if [[ -z "${LIBRAFT_WHL}" ]] || [[ -z "${PYLIBRAFT_WHL}" ]]; then
         echo "  WARNING: pylibraft-gb10-cu13 wheels not found in ${DIST_DIR}."
@@ -277,11 +277,11 @@ phase_pytest() {
     # Note: pip validates that the dist-info name matches the wheel filename, so the
     # source-built wheel keeps its 'cupy' package name.  The stack is identified by
     # its location in dist/gb10/ — not its filename.
-    CUPY_WHL="$(ls "${DIST_DIR}"/cupy-*.whl 2>/dev/null | head -1)"
+    CUPY_WHL="$(ls "${DIST_DIR}"/cupy-*.whl 2>/dev/null | head -1)" || true
     if [[ -z "${CUPY_WHL}" ]]; then
-        CUPY_WHL="$(ls "${DIST_DIR}"/cupy_cuda13x-*.whl 2>/dev/null | head -1)"
+        CUPY_WHL="$(ls "${DIST_DIR}"/cupy_cuda13x-*.whl 2>/dev/null | head -1)" || true
     fi
-    SCIPY_WHL="$(ls "${DIST_DIR}"/scipy-*.whl 2>/dev/null | head -1)"
+    SCIPY_WHL="$(ls "${DIST_DIR}"/scipy-*.whl 2>/dev/null | head -1)" || true
     echo "  cupy wheel:      $(basename "${CUPY_WHL}")"
     echo "  scipy wheel:     $(basename "${SCIPY_WHL}")"
 

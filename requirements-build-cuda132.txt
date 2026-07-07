@@ -16,9 +16,12 @@ scikit-build-core[pyproject]>=0.12.0,<0.13.0
 # CUDA 13.x Python bindings — 13.2.0 is the latest; cap at <14.0 for CUDA major ABI
 cuda-python>=13.2.0,<14.0
 
-# RAPIDS dependencies (nightly wheels, CUDA 13 suffixed, pinned to 26.6 minor)
-librmm-cu13==26.6.*,>=0.0.0a0
-rmm-cu13==26.6.*,>=0.0.0a0
+# RAPIDS dependencies (nightly wheels, CUDA 13 suffixed, pinned to match
+# this repo's current VERSION minor -- must track VERSION/dependencies.yaml's
+# depends_on_librmm pin (26.8.* as of 2026-07-07) or pip's resolver rejects
+# the built libraft-gb10/pylibraft-gb10 wheels as conflicting with this pin.
+librmm-cu13==26.8.*,>=0.0.0a0
+rmm-cu13==26.8.*,>=0.0.0a0
 rapids-logger==0.2.*,>=0.0.0a0
 
 # UCX (required for raft-dask); 1.19.0 is the only 1.19 release available
