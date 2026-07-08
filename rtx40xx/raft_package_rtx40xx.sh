@@ -11,7 +11,10 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=raft_env_rtx40xx.sh
 source "${PROJECT_ROOT}/rtx40xx/raft_env_rtx40xx.sh" || exit 1
 INSTALL_DIR="${PROJECT_ROOT}/cpp/build-rtx40xx/install"
-PKG_NAME="raft-26.6-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx40xx"
+VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
+# Derive short version (e.g. 26.06.00 -> 26.6)
+SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+PKG_NAME="raft-${SHORT_VER}-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx40xx"
 PKG_DIR=/tmp/${PKG_NAME}
 OUT="${PROJECT_ROOT}/${PKG_NAME}.tar.bz2"
 

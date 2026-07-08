@@ -147,7 +147,7 @@ echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
 gh release create "${RELEASE_TAG}" \
     --repo zbrad/raft \
     --title "${RELEASE_TITLE}" \
-    --target "cu132" \
+    --target "native-builds" \
     "${RELEASE_NOTES_ARG[@]}" \
     "${LIBRAFT_WHEEL}#$(basename "${LIBRAFT_WHEEL}")" \
     "${PYLIBRAFT_WHEEL}#$(basename "${PYLIBRAFT_WHEEL}")"

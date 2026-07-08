@@ -13,12 +13,15 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/rtx50xx/raft_env_rtx50xx.sh" || exit 1
 cd "${PROJECT_ROOT}"
 
-PKG_NAME="raft-26.6-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx50xx"
-RELEASE_TAG="v26.6.0-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx50xx"
+VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
+# Derive short version (e.g. 26.06.00 -> 26.6)
+SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+PKG_NAME="raft-${SHORT_VER}-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx50xx"
+RELEASE_TAG="v${SHORT_VER}.0-x86_64-cuda${CUDA_VERSION_COMPACT}-rtx50xx"
 
 gh release create "${RELEASE_TAG}" --repo zbrad/raft \
-  "${PKG_NAME}.tar.bz2#RAFT 26.6 x86_64 CUDA ${CUDA_VERSION} binary package (RTX 50xx)" \
+  "${PKG_NAME}.tar.bz2#RAFT ${SHORT_VER} x86_64 CUDA ${CUDA_VERSION} binary package (RTX 50xx)" \
   "CHECKSUMS_rtx50xx#CHECKSUMS_rtx50xx" \
-  --title "RAFT 26.6 — x86_64 / CUDA ${CUDA_VERSION} / SM_${RTX50_CUDA_ARCH}" \
-  --notes-file RELEASE_NOTES_26.6_rtx50xx.md \
-  --target cu132
+  --title "RAFT ${SHORT_VER} — x86_64 / CUDA ${CUDA_VERSION} / SM_${RTX50_CUDA_ARCH}" \
+  --notes-file "RELEASE_NOTES_${SHORT_VER}_rtx50xx_cu${CUDA_VERSION_COMPACT}.md" \
+  --target "native-builds"

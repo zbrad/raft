@@ -11,7 +11,7 @@ VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
 SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
 RELEASE_TAG="v${VERSION}-${ARCH}-cuda${CUDA_VERSION_COMPACT}-gb10"
 RELEASE_TITLE="RAFT ${SHORT_VER} — ${ARCH} / CUDA ${CUDA_VERSION} / SM_${GB10_CUDA_ARCH} (GB10 / DGX Spark) wheels"
-RELEASE_NOTES="${PROJECT_ROOT}/RELEASE_NOTES_${SHORT_VER}_${ARCH}.md"
+RELEASE_NOTES="${PROJECT_ROOT}/RELEASE_NOTES_${SHORT_VER}_gb10_cu${CUDA_VERSION_COMPACT}.md"
 DIST_DIR="${PROJECT_ROOT}/dist/gb10"
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
 gh release create "${RELEASE_TAG}" \
     --repo zbrad/raft \
     --title "${RELEASE_TITLE}" \
-    --target "gb10" \
+    --target "native-builds" \
     "${RELEASE_NOTES_ARG[@]}" \
     "${LIBRAFT_WHEEL}#$(basename "${LIBRAFT_WHEEL}")" \
     "${PYLIBRAFT_WHEEL}#$(basename "${PYLIBRAFT_WHEEL}")"
