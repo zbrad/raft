@@ -29,6 +29,14 @@ pip install \
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}"
 
+echo "NOTE: this script builds libraft-rtx40xx and pylibraft-rtx40xx only —"
+echo "      raft-dask is NOT built or packaged here. python/raft-dask/pyproject.toml"
+echo "      still hardcodes bare libraft==.../pylibraft==... deps (not"
+echo "      variant-qualified); if raft-dask is ever added to this pipeline it"
+echo "      will need the same dependencies.yaml patch pylibraft already gets"
+echo "      below, or it'll resolve against the wrong (upstream) libraft/pylibraft."
+echo ""
+
 # ── 1. Build libraft-rtx40xx-cuXX ─────────────────────────────────────────────
 # Strategy: pre-place libraft.so from the existing cmake install into the
 # Python package directory (libraft/lib64/), same as gb10/raft_wheel_gb10.sh.

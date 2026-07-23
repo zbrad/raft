@@ -25,6 +25,14 @@ pip install \
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}"
 
+echo "NOTE: this script builds libraft-gb10 and pylibraft-gb10 only —"
+echo "      raft-dask is NOT built or packaged here. python/raft-dask/pyproject.toml"
+echo "      still hardcodes bare libraft==.../pylibraft==... deps (not"
+echo "      variant-qualified); if raft-dask is ever added to this pipeline it"
+echo "      will need the same dependencies.yaml patch pylibraft already gets"
+echo "      below, or it'll resolve against the wrong (upstream) libraft/pylibraft."
+echo ""
+
 # ── 1. Build libraft-gb10-cuXX ────────────────────────────────────────────────
 # Strategy: pre-place libraft.so from the existing cmake install into the Python
 # package directory (libraft/lib64/).  scikit-build-core includes all files from
