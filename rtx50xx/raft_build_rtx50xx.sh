@@ -21,3 +21,18 @@ LIBRAFT_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}" bash build.sh libraft test
 # copied out of this directory by hand.
 cp "${PROJECT_ROOT}/cpp/build-${ARCH}/libraft.so" "${PROJECT_ROOT}/cpp/build-${ARCH}/libraft_rtx50xx.so"
 verify_rtx50xx_arch "${PROJECT_ROOT}/cpp/build-${ARCH}/libraft_rtx50xx.so" || exit 1
+
+# Embed a build-info string into a custom ELF section on the variant-
+# qualified copy (readable later via `readelf -p .raft_build_info <lib>`
+# or plain `strings`), so which CUDA 13.x *minor* toolkit (and which repo
+# fork/commit) built this specific .so is recoverable even if the file
+# gets copied/renamed away from its wheel/VERSION metadata. Full ISO-8601
+# UTC timestamp, not just a date -- see CLAUDE.md's memory-timestamp
+# convention for why bare dates aren't enough (multiple builds can land
+# the same day).
+BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+GIT_COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BUILD_INFO_FILE="$(mktemp)"
+echo "raft-rtx50xx build: https://github.com/zbrad/raft @ ${GIT_COMMIT}, CUDA ${CUDA_VERSION}, sm_${RTX50_CUDA_ARCH}, built ${BUILD_TIMESTAMP}" > "${BUILD_INFO_FILE}"
+objcopy --add-section .raft_build_info="${BUILD_INFO_FILE}" "${PROJECT_ROOT}/cpp/build-${ARCH}/libraft_rtx50xx.so"
+rm -f "${BUILD_INFO_FILE}"
