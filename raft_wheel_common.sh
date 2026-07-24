@@ -35,6 +35,162 @@ patch_line_or_fail() {
     sed -i "s/${pattern}/${replacement}/" "${file}"
 }
 
+# insert_before_or_fail <file> <anchor_text> <new_content> <description>
+# Inserts <new_content> as new line(s) immediately before the first
+# occurrence of <anchor_text> (a literal string, not a regex -- unlike
+# patch_line_or_fail this is for ADDING lines, not substituting an
+# existing one). Verifies the anchor is actually present first, same
+# merge-or-error discipline as patch_line_or_fail: errors loudly instead
+# of silently doing nothing if upstream restructured the file.
+insert_before_or_fail() {
+    local file="$1" anchor="$2" new_content="$3" description="$4"
+    if ! grep -qF -- "${anchor}" "${file}"; then
+        echo "ERROR: expected to find anchor for '${description}' in ${file}," \
+             "but it's not there -- upstream may have changed. anchor: ${anchor}" >&2
+        exit 1
+    fi
+    python3 - "${file}" "${anchor}" "${new_content}" <<'PYEOF'
+import sys
+file, anchor, new_content = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(file) as f:
+    content = f.read()
+content = content.replace(anchor, new_content + "\n" + anchor, 1)
+with open(file, "w") as f:
+    f.write(content)
+PYEOF
+}
+
+# remove_yaml_include_or_fail <file> <block_key> <include_name> <description>
+# Removes a single "- <include_name>" list item from the `includes:` list
+# of the specific top-level dependencies.yaml block named <block_key> --
+# NOT just any line matching <include_name> anywhere in the file. The
+# same include name is commonly reused across many blocks (e.g.
+# depends_on_distributed_ucxx appears both in the top-level conda "all"
+# env and in py_run_raft_dask's own wheel-runtime deps); patch_line_or_fail's
+# whole-file sed would touch every occurrence, which is wrong here --
+# only one specific block's copy should ever be edited. Same merge-or-
+# error discipline as the other patch_*_or_fail helpers: verifies both
+# the block and the include line are present before removing.
+remove_yaml_include_or_fail() {
+    local file="$1" block_key="$2" include_name="$3" description="$4"
+    python3 - "${file}" "${block_key}" "${include_name}" "${description}" <<'PYEOF'
+import sys
+
+file, block_key, include_name, description = sys.argv[1:5]
+with open(file) as f:
+    lines = f.readlines()
+
+
+def indent(s):
+    return len(s) - len(s.lstrip(" "))
+
+
+block_start = None
+block_indent = None
+for i, line in enumerate(lines):
+    if line.strip() == f"{block_key}:":
+        block_start = i
+        block_indent = indent(line)
+        break
+if block_start is None:
+    print(f"ERROR: block '{block_key}' not found in {file} for '{description}'", file=sys.stderr)
+    sys.exit(1)
+
+block_end = len(lines)
+for i in range(block_start + 1, len(lines)):
+    line = lines[i]
+    if line.strip() and indent(line) <= block_indent:
+        block_end = i
+        break
+
+target_idx = None
+for i in range(block_start, block_end):
+    if lines[i].strip() == f"- {include_name}":
+        target_idx = i
+        break
+if target_idx is None:
+    print(
+        f"ERROR: include '{include_name}' not found within block '{block_key}' in "
+        f"{file} for '{description}' -- upstream may have changed",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+del lines[target_idx]
+with open(file, "w") as f:
+    f.writelines(lines)
+PYEOF
+}
+
+# add_yaml_include_or_fail <file> <block_key> <include_name> <description>
+# Inserts a single "- <include_name>" list item into the `includes:` list
+# of the specific top-level dependencies.yaml block named <block_key> --
+# the complement of remove_yaml_include_or_fail. Verifies the block and
+# its `includes:` key exist and that the include isn't already present,
+# same merge-or-error discipline as the other patch_*_or_fail helpers.
+add_yaml_include_or_fail() {
+    local file="$1" block_key="$2" include_name="$3" description="$4"
+    python3 - "${file}" "${block_key}" "${include_name}" "${description}" <<'PYEOF'
+import sys
+
+file, block_key, include_name, description = sys.argv[1:5]
+with open(file) as f:
+    lines = f.readlines()
+
+
+def indent(s):
+    return len(s) - len(s.lstrip(" "))
+
+
+block_start = None
+block_indent = None
+for i, line in enumerate(lines):
+    if line.strip() == f"{block_key}:":
+        block_start = i
+        block_indent = indent(line)
+        break
+if block_start is None:
+    print(f"ERROR: block '{block_key}' not found in {file} for '{description}'", file=sys.stderr)
+    sys.exit(1)
+
+block_end = len(lines)
+includes_idx = None
+child_indent = None
+for i in range(block_start + 1, len(lines)):
+    line = lines[i]
+    if line.strip() and indent(line) <= block_indent:
+        block_end = i
+        break
+    if line.strip() == "includes:":
+        includes_idx = i
+        continue
+    if includes_idx is not None and child_indent is None and line.strip().startswith("- "):
+        child_indent = indent(line)
+
+if includes_idx is None:
+    print(
+        f"ERROR: 'includes:' not found within block '{block_key}' in {file} for "
+        f"'{description}' -- upstream may have changed",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+for i in range(includes_idx, block_end):
+    if lines[i].strip() == f"- {include_name}":
+        print(
+            f"ERROR: include '{include_name}' already present within block '{block_key}' "
+            f"in {file} for '{description}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+indent_str = " " * (child_indent if child_indent is not None else block_indent + 2)
+lines.insert(includes_idx + 1, f"{indent_str}- {include_name}\n")
+with open(file, "w") as f:
+    f.writelines(lines)
+PYEOF
+}
+
 # stage_package_source <project_root> <pkg_relpath> <staging_root>
 # Copies python/<pkg_relpath> (the CURRENT git-tracked source) into
 # <staging_root>/python/<pkg_relpath>, a fresh, isolated copy this
@@ -90,4 +246,175 @@ stage_repo_root_refs() {
     local project_root="$1" staging_root="$2"
     ln -sfn "${project_root}/cmake" "${staging_root}/cmake"
     ln -sfn "${project_root}/cpp" "${staging_root}/cpp"
+}
+
+# embed_build_info <so_path> <variant> <package> <version>
+# Embeds a greppable build-info string into a custom ELF section
+# (.raft_build_info) on the given .so -- readable later via
+# `readelf -p .raft_build_info <so>`, plain `strings`, or a byte-scan
+# (see validate_wheels' check_loaded_variant below). Safe at runtime: a
+# custom section with no program-header entry is simply ignored by the
+# dynamic loader, same technique already used in raft_build_*.sh's
+# archival .so copy.
+#
+# This is what lets validate_wheels() confirm the ACTUAL library that
+# won the site-packages/ install collision (if any) really is this
+# variant's build -- not just that the right distribution's RECORD
+# metadata got installed. Must be called on the exact .so file that ends
+# up staged into the wheel, not a separate archival copy.
+embed_build_info() {
+    local so_path="$1" variant="$2" package="$3" version="$4"
+    local tmp
+    tmp="$(mktemp)"
+    echo "raft-${variant} build: ${package} v${version}, https://github.com/zbrad/raft, built $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${tmp}"
+    objcopy --add-section .raft_build_info="${tmp}" "${so_path}"
+    rm -f "${tmp}"
+}
+
+# validate_wheels <dist_dir> <python_version> <variant>
+# Installs every wheel in <dist_dir> into a fresh, disposable venv (with
+# the RAPIDS nightly index and prereleases allowed -- RAPIDS packages use
+# alpha versioning throughout, e.g. ucxx-cu13==0.51.0a48) and exercises
+# the actual compiled extension code paths, not just a bare import.
+#
+# This distinction is exactly what caught the librmm ABI mismatch: a bare
+# `import pylibraft` succeeds even when the compiled extension can't
+# resolve its symbols -- Python doesn't touch the .so's undefined symbols
+# until something actually calls into the code that references them.
+# Only `from pylibraft.common.handle import Handle; Handle()` (or
+# equivalent) actually loads the extension and would have failed loudly.
+# Run this after every wheel build, before publishing.
+#
+# Collision strategy: libraft/pylibraft/raft-dask genuinely differ per
+# GPU architecture (real device code), so their PyPI *distribution* names
+# stay variant-suffixed (libraft-rtx50xx-cu13 etc) -- but the importable
+# Python package is left unrenamed ("libraft" in site-packages, not
+# "libraft_rtx50xx"). Renaming the import package too was tried and
+# reverted -- it just pushes the identical collision one level up to
+# whatever else does `import librmm`. Instead we follow PyTorch's own
+# precedent for this exact problem (multiple ABI-incompatible builds --
+# CPU/CUDA-11/CUDA-12/ROCm -- of packages that must all import as plain
+# `torch`): a dedicated package index per variant, so a resolver is only
+# ever offered ONE variant as an install candidate, plus unmodified,
+# ordering-based preloading (`import torch` first, pulling in its own
+# native libs before anything else can need them). See
+# https://pytorch.org/get-started/locally/ (per-CUDA-version index URLs)
+# and torch/_C/__init__.py's load-order-dependent native extension init.
+#
+# librmm/rmm are a separate case: they contain no device code (confirmed
+# via `cuobjdump --list-elf`), so they're built ONCE, shared across every
+# GPU variant, at PLAIN (unsuffixed) distribution names matching upstream
+# -- see raft_wheel_librmm_shared.sh. There's no variant axis to check
+# for them here; a version conflict on that shared name is a normal,
+# loud pip resolver error, not a silent collision.
+#
+# Because the "only one variant ever installed" invariant (for
+# libraft/pylibraft/raft-dask) lives outside this repo's control (a
+# consumer's environment, not our wheel metadata), we can't strictly
+# prevent a violation -- only detect it automatically, fast and loudly,
+# in two layers:
+#   1. Cheap: scan installed distribution metadata for a variant +
+#      plain-upstream pair coexisting (the resolver-level precondition
+#      failure).
+#   2. Authoritative: after the libraries are actually loaded, read back
+#      the .raft_build_info marker embed_build_info() wrote into the
+#      library that actually won the site-packages/ file collision, and
+#      confirm it matches the variant under test -- this is what
+#      directly validates "the loaded module is the one we think it is",
+#      independent of what any package's metadata claims.
+#
+# ucxx/libucxx (upstream, not ours -- hard-pin plain rmm-cu13/librmm-cu13
+# in their own metadata) are excluded from raft-dask entirely rather than
+# accommodated: traced their C++ side and confirmed raft-dask's own
+# compiled extensions never actually link against ucxx (see
+# raft_wheel_rtx50xx.sh's raft-dask section), so there was nothing to
+# preserve by keeping the dependency.
+validate_wheels() {
+    local dist_dir="$1" python_version="$2" variant="$3"
+    local venv_dir
+    venv_dir="$(mktemp -d)/validate-venv"
+    echo "Validating wheels in ${dist_dir}..."
+    uv venv "${venv_dir}" --python "${python_version}" >&2 || return 1
+    uv pip install --python "${venv_dir}/bin/python" \
+        --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+        --prerelease=allow \
+        "${dist_dir}"/*.whl >&2
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: wheel install failed -- see output above" >&2
+        rm -rf "${venv_dir}"
+        return 1
+    fi
+
+    "${venv_dir}/bin/python" -c "
+import importlib.metadata as md
+import re
+
+variant = '${variant}'
+
+# Layer 1 (cheap): fail fast if pip's resolver let both a variant
+# distribution and its plain-upstream counterpart into the same
+# environment -- the precondition our ordering-based approach requires.
+installed = {d.name for d in md.distributions()}
+pairs = [
+    (f'libraft-{variant}-cu13', 'libraft-cu13'),
+    (f'pylibraft-{variant}-cu13', 'pylibraft-cu13'),
+    (f'raft-dask-{variant}-cu13', 'raft-dask-cu13'),
+]
+collisions = [(o, u) for o, u in pairs if o in installed and u in installed]
+assert not collisions, (
+    f'COLLISION RISK: both a variant and its plain-upstream counterpart '
+    f'are installed together: {collisions}. This is exactly what the '
+    f'PyTorch-style ordering approach cannot tolerate -- reinstall in an '
+    f'isolated environment containing only the {variant} wheels.'
+)
+
+import pylibraft
+from pylibraft.common.handle import Handle
+Handle()
+print('pylibraft.common.handle.Handle() instantiated OK -- exercises the compiled extension, not just import')
+
+import raft_dask
+from raft_dask.common import Comms
+print('raft_dask.common.Comms imported OK')
+
+# Layer 2 (authoritative): confirm the library that actually won the
+# site-packages/ file collision (if any) really is this variant's own
+# build, by reading the .raft_build_info ELF section embed_build_info()
+# wrote into it at wheel-build time -- not just trusting distribution
+# metadata, which describes what was *asked* to be installed, not what
+# file is actually loaded and running. Only libraft is checked here --
+# librmm is shared (unsuffixed, tagged variant='shared' at build time),
+# so there's no per-GPU-variant identity to verify for it.
+def check_loaded_variant(soname_fragment):
+    with open('/proc/self/maps') as f:
+        maps = f.read()
+    # Anchored on '/' immediately before the fragment so it matches only
+    # the BASENAME (e.g. libraft_rtx50xx_cu133.so) -- a bare substring
+    # search also matches unrelated paths like pylibraft/common/cuda.abi3.so
+    # (contains \"libraft\" inside \"pylibraft\"), confirmed empirically.
+    paths = sorted(set(re.findall(r'(\S*/' + re.escape(soname_fragment) + r'[^/\s]*\.so\S*)', maps)))
+    assert paths, f\"no loaded library path matching '{soname_fragment}' found in /proc/self/maps\"
+    for p in paths:
+        with open(p, 'rb') as bf:
+            data = bf.read()
+        m = re.search(rb'raft-(\w+) build: (\w+) v', data)
+        assert m, f'{p} is loaded but has no embedded raft build-info marker -- not one of our variant builds'
+        found = m.group(1).decode()
+        assert found == variant, (
+            f'COLLISION DETECTED: {p} is loaded, but its build-info marker '
+            f\"says variant '{found}', not the expected '{variant}' -- wrong \"
+            f'variant won the site-packages/ install collision'
+        )
+        print(f'OK: {p} confirmed variant={variant}')
+
+check_loaded_variant('libraft')
+"
+    local result=$?
+    rm -rf "${venv_dir}"
+    if [[ ${result} -ne 0 ]]; then
+        echo "ERROR: wheel validation failed -- see traceback above" >&2
+        return 1
+    fi
+    echo "Wheel validation passed."
+    return 0
 }
