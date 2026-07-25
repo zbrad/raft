@@ -5,7 +5,7 @@
 # this fork carries fixes for. NOT a full test suite; see
 # raft_full_test_gb10.sh for that (runs every built gtest binary).
 # Renamed from raft_test_gb10.sh to make this scope explicit.
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="$(uname -m)"

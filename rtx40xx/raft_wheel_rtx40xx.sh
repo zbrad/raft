@@ -15,7 +15,7 @@
 # NOTE: mirrors rtx50xx/raft_wheel_rtx50xx.sh, which is fully verified
 # end-to-end on real hardware. This variant is untested — run on an
 # x86_64 host with RTX 40xx + CUDA installed.
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="rtx40xx"

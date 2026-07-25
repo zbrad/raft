@@ -10,7 +10,7 @@
 # cpp/build/ with no per-GPU variant. Points at cpp/build-rtx50xx, since RTX
 # 40xx and RTX 50xx share uname -m == x86_64 and would otherwise collide on
 # the same build dir.
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}/cpp/build-rtx50xx"

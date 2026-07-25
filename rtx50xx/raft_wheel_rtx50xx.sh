@@ -11,7 +11,7 @@
 # revert and no risk of one package's build leaking into another's (the
 # previous sed+trap approach hit exactly that: an EXIT trap set for one
 # package silently replaces an earlier one instead of stacking).
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="rtx50xx"

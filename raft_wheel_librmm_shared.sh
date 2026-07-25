@@ -24,7 +24,7 @@
 # verifies this, and raft_wheel_rtx50xx.sh's raft-dask section for why
 # ucxx (previously the one thing that did conflict) is excluded rather
 # than accommodated.
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=raft_wheel_common.sh

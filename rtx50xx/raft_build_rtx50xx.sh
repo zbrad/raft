@@ -4,7 +4,7 @@
 # 50xx; the C++ build had no separate/pinned-arch script of its own.
 #
 # NOTE: untested — run on an x86_64 host with RTX 50xx + CUDA installed.
-export PATH=~/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="rtx50xx"
