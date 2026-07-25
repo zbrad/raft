@@ -67,6 +67,23 @@ mkdir -p "${DIST_DIR}" "${WHEEL_SRC}"
 cp "${SHARED_DIST_DIR}"/librmm*.whl "${SHARED_DIST_DIR}"/rmm_*.whl "${DIST_DIR}/"
 LIBRMM_WHEEL="$(ls "${DIST_DIR}"/librmm*.whl | head -1)"
 RMM_WHEEL="$(ls "${DIST_DIR}"/rmm_*.whl | head -1)"
+# Actually INSTALL these exact wheels into the current build env, not just
+# copy them for later distribution -- pylibraft/raft-dask's own Cython
+# (.pxd) code cimports types (e.g. cuda_stream_pool) from the "rmm" python
+# package, and raft-dask's CMake configure additionally has rmm's cmake
+# config auto-injected into CMAKE_PREFIX_PATH by rapids_build_backend.
+# Without this, whatever rmm-cu13/librmm-cu13 happens to already be
+# installed (a stale nightly, an old leftover, or nothing at all) silently
+# wins instead of the version raft's own C++ build actually resolved --
+# confirmed empirically: raft-dask compiled against a stale nightly's
+# headers and failed at import with `undefined symbol:
+# rmm::_RMM_26_8::device_buffer::~device_buffer()` even though this exact
+# build's own libraft/pylibraft (26.10) worked fine. --force-reinstall
+# ensures this always wins over whatever's currently installed;
+# --no-deps avoids pip's resolver dragging in unrelated packages (e.g.
+# conda-installed ucxx/distributed-ucxx hard-pin rmm-cu13==26.8.* in their
+# own metadata and would re-trigger exactly this bug if deps were resolved).
+pip install --no-deps --force-reinstall "${LIBRMM_WHEEL}" "${RMM_WHEEL}"
 # Placed at the same relative depth from a staged package's pyproject.toml
 # (wheel-src/python/<pkg>/) as the real dependencies.yaml is from the real
 # one, so each package's existing `dependencies-file = "../../dependencies.yaml"`
