@@ -8,7 +8,7 @@ git add \
   .vscode/settings.json \
   gb10/raft_env_gb10.sh \
   gb10/raft_build_gb10.sh \
-  gb10/raft_test_gb10.sh \
+  gb10/raft_regression_test_gb10.sh \
   gb10/raft_package_gb10.sh \
   gb10/raft_release_gb10.sh \
   gb10/raft_wheel_gb10.sh \

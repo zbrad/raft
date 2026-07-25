@@ -1,7 +1,8 @@
 #!/bin/bash
 # raft_wheel_rtx40xx.sh — build libraft-rtx40xx-cuXX + pylibraft-rtx40xx-cuXX
 # + raft-dask-rtx40xx-cuXX wheels for RTX 40xx (SM_89, x86_64) and package
-# them for release.
+# them for release, alongside copies of the shared librmm-cu13/rmm-cu13
+# wheels (built once by raft_wheel_librmm_shared.sh -- run that first).
 #
 # Each package is built from a per-variant staging copy under
 # cpp/build-rtx40xx/wheel-src/ (see raft_wheel_common.sh) instead of
@@ -31,6 +32,16 @@ RELEASE_TITLE="RAFT ${SHORT_VER} — x86_64 / CUDA ${CUDA_VERSION} / SM_${RTX40_
 RELEASE_NOTES="${PROJECT_ROOT}/RELEASE_NOTES_${SHORT_VER}_rtx40xx.md"
 DIST_DIR="${PROJECT_ROOT}/dist/rtx40xx"
 WHEEL_SRC="${PROJECT_ROOT}/cpp/build-${ARCH}/wheel-src"
+# RMM is fetched as a C++ build dependency of raft via rapids-cmake's CPM
+# helper -- read here only to get its exact VERSION, so libraft/pylibraft/
+# raft-dask's dependency pins below can be repointed at the matching
+# version of the shared librmm-cu13/rmm-cu13 wheel (built once by
+# raft_wheel_librmm_shared.sh, not rebuilt per variant -- see that script
+# for why: librmm/rmm contain no device code, so a single build is
+# ABI-correct for every GPU architecture).
+RMM_SRC="${PROJECT_ROOT}/cpp/build-${ARCH}/_deps/rmm-src"
+RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
+RMM_SHORT_VER="$(echo "${RMM_VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
 
 # ── install build deps ─────────────────────────────────────────────────────────
 echo "Installing build dependencies..."
@@ -38,14 +49,53 @@ pip install \
     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
     -r "${PROJECT_ROOT}/requirements-build-cuda13x.txt"
 
+SHARED_DIST_DIR="${PROJECT_ROOT}/dist/shared"
+[[ -n "$(ls "${SHARED_DIST_DIR}"/librmm*.whl 2>/dev/null)" && -n "$(ls "${SHARED_DIST_DIR}"/rmm_*.whl 2>/dev/null)" ]] || {
+    echo "ERROR: ${SHARED_DIST_DIR} is missing librmm/rmm wheels -- run" \
+         "raft_wheel_librmm_shared.sh first (librmm/rmm have no device code" \
+         "and are built once, shared across all GPU variants, not per-variant)." >&2
+    exit 1
+}
+
 rm -rf "${DIST_DIR}" "${WHEEL_SRC}"
 mkdir -p "${DIST_DIR}" "${WHEEL_SRC}"
+# Copy the pre-built, shared librmm/rmm wheels into this variant's own
+# dist dir so a single `pip install dist/rtx40xx/*.whl` and a single
+# GitHub release still provide everything this variant needs -- the
+# BUILD happens once (raft_wheel_librmm_shared.sh), but each variant's
+# release still bundles copies for one-stop installability.
+cp "${SHARED_DIST_DIR}"/librmm*.whl "${SHARED_DIST_DIR}"/rmm_*.whl "${DIST_DIR}/"
+LIBRMM_WHEEL="$(ls "${DIST_DIR}"/librmm*.whl | head -1)"
+RMM_WHEEL="$(ls "${DIST_DIR}"/rmm_*.whl | head -1)"
 # Placed at the same relative depth from a staged package's pyproject.toml
 # (wheel-src/python/<pkg>/) as the real dependencies.yaml is from the real
 # one, so each package's existing `dependencies-file = "../../dependencies.yaml"`
 # reference resolves correctly with no path rewriting.
 stage_dependencies_yaml "${PROJECT_ROOT}" "${WHEEL_SRC}"
 stage_repo_root_refs "${PROJECT_ROOT}" "${WHEEL_SRC}"
+# libraft's OWN dependencies list (via depends_on_librmm) requires bare
+# librmm-cu13 too -- this must be patched before ANY package is built
+# against this staged dependencies.yaml, not just pylibraft/raft-dask's
+# own cross-package dependency, or libraft-rtx40xx-cu13's own metadata
+# would still pull in the WRONG VERSION of librmm at install time
+# (confirmed empirically on rtx50xx: this exact gap caused
+# "undefined symbol: ...rmm::RMM_26_10::...pool_memory_resource_impl..."
+# at runtime, since raft's C++ build fetches a newer RMM via CPM than
+# dependencies.yaml's own "librmm==26.8.*" pin expects). Only the VERSION
+# needs patching here, not the name -- librmm/rmm are built once, shared
+# across every GPU variant (see raft_wheel_librmm_shared.sh; no per-arch
+# device code means no per-variant distribution name is needed either).
+patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
+    "- librmm-cu${CUDA_VERSION_COMPACT:0:2}==26\.8\.\*,>=0\.0\.0a0" \
+    "- librmm-cu${CUDA_VERSION_COMPACT:0:2}==${RMM_SHORT_VER}.*,>=0.0.0a0" \
+    "libraft's librmm dependency (version -- our shared librmm-cu13 wheel is actually RMM's own ${RMM_VERSION}, not raft's 26.8.*)"
+# pylibraft/raft-dask ALSO directly depend on bare "rmm==26.8.*" (the
+# PYTHON rmm package, separate from librmm) -- same version mismatch,
+# fixed the same way via raft_wheel_librmm_shared.sh's rmm-cu13 build.
+patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
+    "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==26\.8\.\*,>=0\.0\.0a0" \
+    "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==${RMM_SHORT_VER}.*,>=0.0.0a0" \
+    "pylibraft/raft-dask's rmm (python) dependency (version)"
 
 # ── 1. Build libraft-rtx40xx-cuXX ─────────────────────────────────────────────
 # Strategy: pre-place libraft.so from the existing cmake install into the
@@ -77,6 +127,7 @@ fi
 verify_rtx40xx_arch /tmp/raft-rtx40xx-install/lib/libraft.so || exit 1
 cp /tmp/raft-rtx40xx-install/lib/libraft.so "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}"
 rm -rf /tmp/raft-rtx40xx-install
+embed_build_info "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}" "rtx40xx" "libraft" "${VERSION}+cu${CUDA_VERSION_COMPACT}"
 
 patch_line_or_fail "${LIBRAFT_STAGED}/pyproject.toml" \
     '^name = "libraft"' 'name = "libraft-rtx40xx"' "libraft package name"
@@ -86,6 +137,11 @@ patch_line_or_fail "${LIBRAFT_STAGED}/pyproject.toml" \
 echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${LIBRAFT_STAGED}/libraft/VERSION"
 patch_line_or_fail "${LIBRAFT_STAGED}/libraft/load.py" \
     'soname = "libraft\.so"' "soname = \"${LIBRAFT_SONAME}\"" "libraft load.py soname"
+# load.py's bare "import librmm" (preloading librmm.so before libraft.so
+# itself, since libraft.so's symbols are a real runtime dependency of it)
+# is left untouched -- matches upstream, no dynamic import_module() needed.
+# See the PyTorch-ordering citation in raft_wheel_common.sh's
+# validate_wheels() for why.
 
 echo "Building libraft-rtx40xx wheel v${VERSION}+cu${CUDA_VERSION_COMPACT} for x86_64 (bundles libraft.so as ${LIBRAFT_SONAME})..."
 SKBUILD_CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
@@ -146,6 +202,50 @@ patch_line_or_fail "${RAFT_DASK_STAGED}/pyproject.toml" \
 patch_line_or_fail "${RAFT_DASK_STAGED}/pyproject.toml" \
     '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true"\ncommit-files = []' \
     "raft-dask matrix-entry"
+# Drop the hard dependency on distributed-ucxx-cu13 (UCX-based comms, an
+# ALTERNATE backend to NCCL). Traced its C++ side (confirmed on rtx50xx,
+# same source tree here): raft-dask's own CMakeLists.txt CPM-fetches+
+# builds ucxx (get_ucxx.cmake) only to satisfy raft::distributed's
+# exported CMake config at configure time -- the actual compiled
+# extensions we ship (comms_utils.pyx/nccl.pyx, see
+# raft_dask/common/CMakeLists.txt) link only against raft::raft/
+# raft::distributed, never ucxx::ucxx/ucxx::python. So the CPM-built
+# libucxx.a is unused build scaffolding, not something worth harvesting.
+# The only REAL runtime use is the pure-Python raft_dask/common/ucx.py,
+# an optional alternate transport this fork's actual use case (NCCL
+# between GB10s) never touches. ucxx-cu13/libucxx-cu13 (upstream, not
+# ours) hard-pin plain rmm-cu13/librmm-cu13==26.8.* in their own
+# metadata -- installing them would reintroduce exactly the collision
+# risk validate_wheels() detects, for a backend nothing here needs.
+remove_yaml_include_or_fail "${WHEEL_SRC}/dependencies.yaml" "py_run_raft_dask" "depends_on_distributed_ucxx" \
+    "drop hard ucxx dependency from raft-dask-rtx40xx (see ucx.py lazy-import patch below)"
+# BUT raft-dask's compiled comms_utils.so (raft::distributed) has a real,
+# unconditional DT_NEEDED on libucp.so.0 (raw UCX) regardless of whether
+# the Python ucxx wrapper is used -- confirmed empirically on rtx50xx:
+# removing distributed-ucxx above (which transitively supplied
+# libucx-cu13) broke `import raft_dask` outright with "ImportError:
+# libucp.so.0: cannot open shared object file". depends_on_ucx_build
+# already declares the correct libucx-cu13 pin for pyproject/requirements
+# output, but only for py_rapids_build_raft_dask (build-time); add it to
+# py_run_raft_dask (runtime) too. Confirmed via PyPI metadata this has
+# ZERO dependencies of its own (no rmm/librmm anywhere in its closure) --
+# pure raw UCX, so this doesn't reopen the collision risk that ucxx did.
+add_yaml_include_or_fail "${WHEEL_SRC}/dependencies.yaml" "py_run_raft_dask" "depends_on_ucx_build" \
+    "add libucx-cu13 as a runtime (not just build-time) dependency of raft-dask-rtx40xx"
+# Move ucx.py's top-level "import ucxx" into UCX.__init__ so merely
+# importing raft_dask (or using NCCL-based Comms, which never touches
+# UCX) no longer requires ucxx to be installed at all -- only actually
+# instantiating the UCX class does.
+patch_line_or_fail "${RAFT_DASK_STAGED}/raft_dask/common/ucx.py" \
+    '^import ucxx$' \
+    '# ucxx is imported lazily in UCX.__init__ below -- not required just to import raft_dask' \
+    "ucx.py lazy ucxx import (remove eager top-level import)"
+insert_before_or_fail "${RAFT_DASK_STAGED}/raft_dask/common/ucx.py" \
+    "        self.listener_callback = listener_callback" \
+    "        global ucxx
+        import ucxx
+" \
+    "ucx.py lazy ucxx import (import inside __init__)"
 echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${RAFT_DASK_STAGED}/raft_dask/VERSION"
 # Same dependencies.yaml-not-pyproject.toml reasoning as step 2 -- a
 # second, different anchor line in the same staged copy (the libraft-cuXX==
@@ -154,14 +254,15 @@ patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
     "- pylibraft-cu${CUDA_VERSION_COMPACT:0:2}==" "- pylibraft-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2}==" \
     "raft-dask's pylibraft dependency"
 
-# raft-dask's dependency ucxx needs find_package(ucx) at CMake configure
-# time. The pip libucx-cu13 wheel (installed via requirements-build-cuda13x.txt)
-# does ship a CMake config (site-packages/libucx/lib/cmake/ucx/ucx-config.cmake),
-# it's just not on CMake's default search path -- add it via the
-# CMAKE_PREFIX_PATH *environment* variable (which CMake reads natively,
-# unlike passing it through SKBUILD_CMAKE_ARGS's own semicolon-delimited
-# arg list, which would collide with CMAKE_PREFIX_PATH's own semicolon-
-# separated multi-path syntax).
+# raft-dask's build (CMake configure) needs find_package(ucx) at
+# configure time. The pip libucx-cu13 wheel (installed via
+# requirements-build-cuda13x.txt) does ship a CMake config
+# (site-packages/libucx/lib/cmake/ucx/ucx-config.cmake), it's just not on
+# CMake's default search path -- add it via the CMAKE_PREFIX_PATH
+# *environment* variable (which CMake reads natively, unlike passing it
+# through SKBUILD_CMAKE_ARGS's own semicolon-delimited arg list, which
+# would collide with CMAKE_PREFIX_PATH's own semicolon-separated
+# multi-path syntax).
 UCX_CMAKE_PREFIX="$(python3 -c 'import libucx, os; print(os.path.dirname(libucx.__file__))')"
 # raft's own FindNCCL.cmake (raft-config.cmake -> raft-distributed-dependencies.cmake)
 # falls back to find_library(NAMES nccl) / find_path(NAMES nccl.h) when no
@@ -176,8 +277,16 @@ NCCL_PREFIX="$(python3 -c 'import nvidia.nccl as m; print(list(m.__path__)[0])')
 NCCL_LIBRARY="$(ls "${NCCL_PREFIX}"/lib/libnccl.so* | head -1)"
 
 echo "Building raft-dask-rtx40xx wheel v${VERSION}+cu${CUDA_VERSION_COMPACT} for x86_64..."
+# USE_NCCL_RUNTIME_WHEEL=ON (raft_dask/common/CMakeLists.txt, default OFF)
+# sets the compiled extension's RPATH to $ORIGIN/../../nvidia/nccl/lib --
+# i.e. the pip-installed nvidia-nccl-cu13 wheel's own bundled libnccl.so.2
+# -- instead of expecting a system-wide NCCL install. Without this,
+# `import raft_dask` fails with "ImportError: libnccl.so.2: cannot open
+# shared object file" even though nvidia-nccl-cu13 IS installed (confirmed
+# empirically on rtx50xx): the wheel is present, just not on the dynamic
+# linker's default search path, and nothing set an RPATH to it at link time.
 CMAKE_PREFIX_PATH="${INSTALL_DIR};${UCX_CMAKE_PREFIX}" \
-SKBUILD_CMAKE_ARGS="-Draft_ROOT=${INSTALL_DIR};-DNCCL_LIBRARY=${NCCL_LIBRARY};-DNCCL_INCLUDE_DIR=${NCCL_PREFIX}/include" \
+SKBUILD_CMAKE_ARGS="-Draft_ROOT=${INSTALL_DIR};-DNCCL_LIBRARY=${NCCL_LIBRARY};-DNCCL_INCLUDE_DIR=${NCCL_PREFIX}/include;-DUSE_NCCL_RUNTIME_WHEEL=ON" \
     pip wheel \
         --no-deps \
         --no-build-isolation \
@@ -188,14 +297,17 @@ RAFT_DASK_WHEEL="$(ls "${DIST_DIR}"/raft_dask*.whl 2>/dev/null | head -1)" || tr
 [[ -z "${RAFT_DASK_WHEEL}" ]] && { echo "ERROR: raft-dask wheel not found" >&2; exit 1; }
 echo "raft-dask wheel: $(basename "${RAFT_DASK_WHEEL}") ($(du -sh "${RAFT_DASK_WHEEL}" | awk '{print $1}'))"
 
-# ── 4. Publish all three wheels ───────────────────────────────────────────────
+# ── 4. Publish all five wheels ────────────────────────────────────────────────
+# librmm-cu13/rmm-cu13 are copies of the shared build (raft_wheel_librmm_shared.sh
+# published them under their own release already); bundled here too so this
+# one release remains a complete, one-stop install for this GPU variant.
 cd "${PROJECT_ROOT}"
 
 RELEASE_NOTES_ARG=()
 if [[ -f "${RELEASE_NOTES}" ]]; then
     RELEASE_NOTES_ARG=(--notes-file "${RELEASE_NOTES}")
 else
-    RELEASE_NOTES_ARG=(--notes "pylibraft-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} + libraft-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} + raft-dask-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} ${VERSION}+cu${CUDA_VERSION_COMPACT} wheels for x86_64 / CUDA ${CUDA_VERSION} / SM_${RTX40_CUDA_ARCH} (RTX 40xx / Ada)")
+    RELEASE_NOTES_ARG=(--notes "pylibraft-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} + libraft-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} + raft-dask-rtx40xx-cu${CUDA_VERSION_COMPACT:0:2} ${VERSION}+cu${CUDA_VERSION_COMPACT} wheels for x86_64 / CUDA ${CUDA_VERSION} / SM_${RTX40_CUDA_ARCH} (RTX 40xx / Ada), bundled with the shared librmm-cu13/rmm-cu13 $(basename "${LIBRMM_WHEEL}") build (no device code -- shared across GPU variants, see raft_wheel_librmm_shared.sh)")
 fi
 
 echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
@@ -204,6 +316,8 @@ gh release create "${RELEASE_TAG}" \
     --title "${RELEASE_TITLE}" \
     --target "native-builds" \
     "${RELEASE_NOTES_ARG[@]}" \
+    "${LIBRMM_WHEEL}#$(basename "${LIBRMM_WHEEL}")" \
+    "${RMM_WHEEL}#$(basename "${RMM_WHEEL}")" \
     "${LIBRAFT_WHEEL}#$(basename "${LIBRAFT_WHEEL}")" \
     "${PYLIBRAFT_WHEEL}#$(basename "${PYLIBRAFT_WHEEL}")" \
     "${RAFT_DASK_WHEEL}#$(basename "${RAFT_DASK_WHEEL}")"
