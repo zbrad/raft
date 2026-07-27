@@ -1,0 +1,57 @@
+# Python build requirements for RAFT on any CUDA 13.x toolkit (aarch64 DGX
+# Spark / GB10, and x86_64 RTX 40xx / RTX 50xx). Renamed from
+# requirements-build-cuda132.txt: nothing in here is pinned to a specific
+# CUDA *minor* version -- gb10/rtx40xx/rtx50xx's raft_env_*.sh scripts all
+# auto-detect and build against the highest installed toolkit (13.2, 13.3,
+# ...), so a filename naming one specific minor version was misleading.
+# "13x" (not bare "13") matches this repo's existing cupy-cuda13x convention
+# for "any CUDA 13.x minor version".
+#
+# Install with:
+#   pip install -r tuned/requirements-build-cuda13x.txt \
+#     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+
+--extra-index-url=https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+
+# Build tools
+# rapids-build-backend 0.4.1 is the latest in the 0.4.x series
+rapids-build-backend>=0.4.1,<0.5.0
+# scikit-build-core 0.12.x: 0.12.2 validated; cap at 0.13 to avoid breaking changes
+scikit-build-core[pyproject]>=0.12.0,<0.13.0
+# Cython (required to build pylibraft's and raft-dask's .pyx extensions).
+# raft_wheel_*.sh use `pip wheel --no-build-isolation`, so pyproject.toml's
+# own build-time "cython>=3.2.2" requirement is never auto-installed -- it
+# has to be pre-installed here instead. Missing entirely until pylibraft's
+# wheel was actually built for the first time (previously only libraft's
+# wheel, which has no Cython extensions, had ever been exercised).
+cython>=3.2.2
+
+# CUDA 13.x Python bindings — 13.2.0 is the latest; cap at <14.0 for CUDA major ABI
+cuda-python>=13.2.0,<14.0
+
+# librmm-cu13/rmm-cu13 are deliberately NOT listed here. This file used to
+# hardcode them at "26.8.*" (matching dependencies.yaml's depends_on_librmm
+# pin as of 2026-07-07), but that's now actively wrong: raft's own CPM fetch
+# of rmm (see raft_wheel_librmm_shared.sh) can resolve to a different actual
+# version (confirmed: 26.10.00 on 2026-07-25, while this pin still said
+# 26.8.*), and pip installing the stale-pinned nightly wheel here plants its
+# bundled headers/cmake config under site-packages/librmm -- which
+# rapids_build_backend then auto-injects into CMAKE_PREFIX_PATH for raft-dask's
+# build, ahead of the conda env's own genuinely-matching rmm install. Result:
+# raft-dask compiles against the WRONG rmm headers even though libraft/
+# pylibraft (which don't get this auto-injection) compile correctly --
+# confirmed via `undefined symbol: rmm::_RMM_26_8::device_buffer::~device_buffer()`
+# at raft-dask import time, decoded with c++filt. Leaving this unpinned means
+# find_package(rmm) falls through to the conda env's own rmm (which
+# raft_build_*.sh's `cmake --install` step keeps in sync with whatever CPM
+# actually fetched) instead of a mismatched pip package.
+rapids-logger==0.2.*,>=0.0.0a0
+
+# UCX (required for raft-dask); 1.19.0 is the only 1.19 release available
+libucx-cu13>=1.19.0,<1.19.1
+
+# NCCL (required for raft-dask's comms_utils/nccl Cython extensions,
+# depends_on_nccl in dependencies.yaml) -- was missing from this file
+# entirely until raft-dask was added to the variant wheel pipeline, since
+# neither libraft nor pylibraft need it.
+nvidia-nccl-cu13>=2.19
