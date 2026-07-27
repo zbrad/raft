@@ -1,1 +1,30 @@
-*.sh text eol=lf
+# Normalize line endings to LF in the repository and on checkout, regardless
+# of what tool (editor, sync client, Windows-side process through a WSL
+# mount, etc.) touches the working tree. Prevents the whole-file CRLF drift
+# this repo hit before (every line flipped, no real content change, showing
+# up as a massive spurious diff).
+* text=auto eol=lf
+
+# Explicitly binary -- never touch line endings in these regardless of the
+# text=auto heuristic above.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.so binary
+*.dylib binary
+*.dll binary
+*.whl binary
+*.tar binary
+*.tar.gz binary
+*.tgz binary
+*.tar.bz2 binary
+*.zip binary
+*.npy binary
+*.npz binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.bin binary
