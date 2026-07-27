@@ -46,6 +46,12 @@ SOURCE_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${SOURCE_ARCH}"
 RMM_SRC="${SOURCE_BUILD_DIR}/_deps/rmm-src"
 [[ -d "${RMM_SRC}" ]] || { echo "ERROR: ${RMM_SRC} not found" >&2; exit 1; }
 
+# Only GPU_TUNED_PLATFORM is needed here (for RELEASE_TAG/RELEASE_TITLE's
+# human-facing OS/CPU descriptor below) -- this script has no CUDA-arch
+# axis of its own (librmm/rmm have no device code), so gpu_tuned_env.sh's
+# full detection isn't needed, just the static per-variant conf.
+source "${PROJECT_ROOT}/gpu_tuned/devices/${SOURCE_ARCH}.conf" || exit 1
+
 if ! command -v nvcc &>/dev/null; then
     mapfile -t _CUDA_TOOLKITS < <(for d in /usr/local/cuda-*; do [[ -x "${d}/bin/nvcc" ]] && echo "${d}"; done | sort -V)
     (( ${#_CUDA_TOOLKITS[@]} > 0 )) && export PATH="${_CUDA_TOOLKITS[-1]}/bin:${PATH}"
@@ -60,8 +66,8 @@ RMM_SHORT_VER="$(echo "${RMM_VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\
 DIST_DIR="${PROJECT_ROOT}/dist/shared"
 WHEEL_SRC_RMM="${SOURCE_BUILD_DIR}/wheel-src-rmm-shared"
 INSTALL_DIR="${SOURCE_BUILD_DIR}/install"
-RELEASE_TAG="librmm-v${RMM_VERSION}-x86_64-cuda${CUDA_VERSION_COMPACT}"
-RELEASE_TITLE="librmm/rmm ${RMM_VERSION} — x86_64 / CUDA ${CUDA_VERSION} (shared across all GPU variants)"
+RELEASE_TAG="librmm-v${RMM_VERSION}-${GPU_TUNED_PLATFORM}-cuda${CUDA_VERSION_COMPACT}"
+RELEASE_TITLE="librmm/rmm ${RMM_VERSION} — ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} (shared across all GPU variants)"
 RELEASE_NOTES="${PROJECT_ROOT}/RELEASE_NOTES_librmm_${RMM_SHORT_VER}_shared.md"
 
 echo "Installing build dependencies..."
@@ -102,7 +108,7 @@ echo "${RMM_VERSION}+cu${CUDA_VERSION_COMPACT}" > "${LIBRMM_STAGED}/librmm/VERSI
 patch_line_or_fail "${LIBRMM_STAGED}/librmm/load.py" \
     'soname = "librmm\.so"' "soname = \"${LIBRMM_SONAME}\"" "librmm load.py soname"
 
-echo "Building librmm-cu13 wheel v${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} for x86_64 (bundles librmm.so as ${LIBRMM_SONAME})..."
+echo "Building librmm-cu13 wheel v${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} for ${GPU_TUNED_PLATFORM} (bundles librmm.so as ${LIBRMM_SONAME})..."
 SKBUILD_CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
     pip wheel \
         --no-deps \
@@ -129,7 +135,7 @@ echo "${RMM_VERSION}+cu${CUDA_VERSION_COMPACT}" > "${RMM_STAGED}/rmm/VERSION"
 # (its own actual version) -- no patch needed here since we didn't rename
 # librmm's distribution either.
 
-echo "Building rmm-cu13 wheel v${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} for x86_64..."
+echo "Building rmm-cu13 wheel v${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} for ${GPU_TUNED_PLATFORM}..."
 SKBUILD_CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
     pip wheel \
         --no-deps \
@@ -148,7 +154,7 @@ RELEASE_NOTES_ARG=()
 if [[ -f "${RELEASE_NOTES}" ]]; then
     RELEASE_NOTES_ARG=(--notes-file "${RELEASE_NOTES}")
 else
-    RELEASE_NOTES_ARG=(--notes "librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for x86_64 / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40xx/rtx50xx); consumed by each variant's own libraft/pylibraft/raft-dask release.")
+    RELEASE_NOTES_ARG=(--notes "librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40xx/rtx50xx); consumed by each variant's own libraft/pylibraft/raft-dask release.")
 fi
 
 echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."

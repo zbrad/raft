@@ -5,8 +5,10 @@
 #
 # This file describes the Python environment and dependency bounds verified on
 # NVIDIA DGX Spark hardware as of RAFT 26.6.  It is NOT a pip-installable
-# package — it is used by:
-#   - gb10/raft_wheel_gb10.sh  (build + publish)
+# package, and gb10/raft_wheel_gb10.sh does NOT read it -- that script only
+# touches staged per-package pyproject.toml copies under
+# cpp/build-gb10/wheel-src/ (see raft_wheel_common.sh), never this
+# repo-root one. This file is used by:
 #   - .venv creation (see .python-version)
 #   - IDE / type-checker configuration
 #
@@ -94,9 +96,9 @@ ignore_missing_imports = true
 # Platform / environment documentation  (not enforced by pip, informational)
 # ---------------------------------------------------------------------------
 [tool.gb10-env]
-cuda_version = "13.2"
-cuda_version_compact = "132"
-cuda_arch = "121"          # SM_12.1 — NVIDIA GB10 (DGX Spark)
+cuda_version = "13.3"
+cuda_version_compact = "133"
+cuda_arch = "121a"         # SM_121a — NVIDIA GB10 (DGX Spark)
 arch = "aarch64"
 pip_index_extra = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple"
 release_tag = "v26.06.00-aarch64-cuda132-spark"

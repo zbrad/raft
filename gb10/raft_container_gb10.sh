@@ -21,22 +21,26 @@
 #
 # For a smaller arch-specific cupy wheel (~10-20 MB, SM_121a only), build from
 # source first:
-#   bash gb10/raft_cupy_build.sh         # outputs cupy_cuda13x-*.whl to dist/gb10/
+#   bash gb10/raft_cupy_build_gb10.sh         # outputs cupy_cuda13x-*.whl to dist/gb10/
 #   pip download --no-deps scipy -d dist/gb10/
 # Then re-run --pytest; it will pick up the local wheels automatically.
 #
 # scipy is required not just for testing but at runtime by cupyx.scipy.sparse
 # (cupy's GPU sparse linear-algebra module).  Always distribute cupy and scipy
-# together.  See gb10/raft_cupy_build.sh for the full explanation.
+# together.  See gb10/raft_cupy_build_gb10.sh for the full explanation.
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVCONTAINER_CONFIG="${PROJECT_ROOT}/.devcontainer/cuda13.2-pip-spark/devcontainer.json"
 IMAGE_TAG="${IMAGE_TAG:-raft-cuda13.2-pip-spark:26.06}"
-# Must match GB10_CUDA_ARCH in gb10/raft_env_gb10.sh (not sourced here since
-# this script only drives docker and needs no local CUDA toolkit).
-CUDA_ARCH="121a"
+# gpu_tuned/devices/gb10.conf is pure variable assignment (no nvcc probing),
+# safe to source here even though this script only drives docker and needs
+# no local CUDA toolkit -- avoids a second hardcoded copy of the arch string
+# drifting from gpu_tuned_env.sh's own value.
+# shellcheck source=../gpu_tuned/devices/gb10.conf
+source "${PROJECT_ROOT}/gpu_tuned/devices/gb10.conf"
+CUDA_ARCH="${GPU_TUNED_CUDA_ARCH}"
 
 # ── parse flags ────────────────────────────────────────────────────────────────
 DO_BUILD=0
@@ -141,7 +145,7 @@ check_warn() {
 }
 
 # ── image-level checks (hard failures) ──────────────────────────────────────
-check_eq "CUDAARCHS"              "121a" "${CUDAARCHS:-}"
+check_eq "CUDAARCHS"              "${EXPECTED_CUDAARCHS:-}" "${CUDAARCHS:-}"
 check_eq "PYTHON_PACKAGE_MANAGER" "pip"  "${PYTHON_PACKAGE_MANAGER:-}"
 check    "nvcc present"           which nvcc
 check    "nvcc executes"          nvcc --version
@@ -177,6 +181,7 @@ SMOKE
 
     docker run --rm \
         -e CUDAARCHS="${CUDA_ARCH}" \
+        -e EXPECTED_CUDAARCHS="${CUDA_ARCH}" \
         -e PYTHON_PACKAGE_MANAGER=pip \
         "${IMAGE_TAG}" \
         bash -c "${SMOKE_SCRIPT}"
@@ -207,9 +212,8 @@ phase_test() {
     # The gtest phase runs pre-built binaries from the host's build dir inside
     # the container. This validates that SM_121a binaries execute correctly in
     # the containerised environment without needing internet or a full rebuild.
-    ARCH="$(uname -m)"
-    HOST_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${ARCH}"
-    CONTAINER_BUILD_DIR="/home/coder/raft/cpp/build-${ARCH}"
+    HOST_BUILD_DIR="${PROJECT_ROOT}/cpp/build-gb10"
+    CONTAINER_BUILD_DIR="/home/coder/raft/cpp/build-gb10"
 
     if [[ ! -f "${HOST_BUILD_DIR}/gtests/UTILS_TEST" ]] || \
        [[ ! -f "${HOST_BUILD_DIR}/gtests/LINALG_TEST" ]]; then
@@ -264,7 +268,7 @@ phase_pytest() {
 
     # Ensure test-only deps (cupy, scipy) are cached in dist/gb10 so
     # the container never needs outbound PyPI access during the test phase.
-    # Prefer a source-built arch-specific wheel (gb10/raft_cupy_build.sh) if
+    # Prefer a source-built arch-specific wheel (gb10/raft_cupy_build_gb10.sh) if
     # present; fall back to downloading the PyPI binary.
     if ! ls "${DIST_DIR}"/cupy-*.whl &>/dev/null && ! ls "${DIST_DIR}"/cupy_cuda13x-*.whl &>/dev/null || \
        ! ls "${DIST_DIR}"/scipy-*.whl &>/dev/null; then
@@ -272,7 +276,7 @@ phase_pytest() {
         pip download --quiet --no-deps cupy-cuda13x scipy -d "${DIST_DIR}"
     fi
     # Preference order for cupy wheel:
-    #   1. cupy-*.whl        — source-built SM_121a-only (gb10/raft_cupy_build.sh), ~36 MB
+    #   1. cupy-*.whl        — source-built SM_121a-only (gb10/raft_cupy_build_gb10.sh), ~36 MB
     #   2. cupy_cuda13x-*.whl — PyPI binary w/ all arches (auto-downloaded below), ~73 MB
     # Note: pip validates that the dist-info name matches the wheel filename, so the
     # source-built wheel keeps its 'cupy' package name.  The stack is identified by
