@@ -339,7 +339,7 @@ echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
 gh release create "${RELEASE_TAG}" \
     --repo zbrad/raft \
     --title "${RELEASE_TITLE}" \
-    --target "native-builds" \
+    --target "tuned-builds" \
     "${RELEASE_NOTES_ARG[@]}" \
     "${LIBRMM_WHEEL}#$(basename "${LIBRMM_WHEEL}")" \
     "${RMM_WHEEL}#$(basename "${RMM_WHEEL}")" \

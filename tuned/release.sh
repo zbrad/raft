@@ -28,4 +28,4 @@ gh release create "${RELEASE_TAG}" --repo zbrad/raft \
   "tuned/releases/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
   --title "RAFT ${SHORT_VER} — ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH}" \
   --notes-file "${RELEASE_NOTES_FILE}" \
-  --target "native-builds"
+  --target "tuned-builds"
