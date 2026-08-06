@@ -1,7 +1,7 @@
 #!/bin/bash
 # cupy_build.sh <variant> — Build a CUDA-arch-specific cupy
 # wheel for the given GPU variant and place it in dist/<variant>/. Shared
-# implementation behind every gb10/rtx40xx/rtx50xx
+# implementation behind every gb10/rtx40/rtx50
 # raft_cupy_build_<variant>.sh wrapper.
 #
 # ── Why build from source instead of the PyPI wheel? ─────────────────────────
@@ -19,10 +19,10 @@
 # Reference: https://docs.cupy.dev/en/stable/install.html#python-dependencies
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
-#   bash tuned/cupy_build.sh rtx50xx                    # default version + output dir
-#   CUPY_VERSION=14.0.1 bash tuned/cupy_build.sh rtx50xx  # pin a specific cupy version
-#   DIST_DIR=/path/to/out bash tuned/cupy_build.sh rtx50xx  # override output directory
-#   CUPY_NUM_BUILD_JOBS=16 bash tuned/cupy_build.sh rtx50xx  # parallel C++ compile jobs
+#   bash tuned/cupy_build.sh rtx50                    # default version + output dir
+#   CUPY_VERSION=14.0.1 bash tuned/cupy_build.sh rtx50  # pin a specific cupy version
+#   DIST_DIR=/path/to/out bash tuned/cupy_build.sh rtx50  # override output directory
+#   CUPY_NUM_BUILD_JOBS=16 bash tuned/cupy_build.sh rtx50  # parallel C++ compile jobs
 #
 # Environment variables honoured:
 #   CUPY_VERSION           default: 14.0.1
@@ -45,7 +45,7 @@ JOBS="${CUPY_NUM_BUILD_JOBS:-$(nproc)}"
 NVCC_THREADS="${CUPY_NUM_NVCC_THREADS:-2}"
 
 # The virtual (PTX) arch and real arch match for every variant here (e.g.
-# compute_121a/sm_121a for gb10, compute_120/sm_120 for rtx50xx) -- the
+# compute_121a/sm_121a for gb10, compute_120/sm_120 for rtx50) -- the
 # "a" suffix (or lack of it) is exactly GPU_TUNED_CUDA_ARCH's own value,
 # see tuned/devices/*.conf for why each variant needs what it needs.
 CUPY_NVCC_GENERATE_CODE="arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}"

@@ -5,7 +5,7 @@
 # two known upstream bugs this fork carries fixes for. NOT a full test
 # suite; see full_test.sh for that (runs every built gtest
 # binary). Shared implementation behind every
-# gb10/rtx40xx/rtx50xx raft_regression_test_<variant>.sh wrapper.
+# gb10/rtx40/rtx50 raft_regression_test_<variant>.sh wrapper.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 GPU_TUNED_ARG_VARIANT="$1"

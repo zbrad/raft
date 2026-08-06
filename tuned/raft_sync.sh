@@ -13,8 +13,8 @@ cd "${PROJECT_ROOT}"
 git add \
   .vscode/settings.json \
   tuned/gb10/ \
-  tuned/rtx40xx/ \
-  tuned/rtx50xx/ \
+  tuned/rtx40/ \
+  tuned/rtx50/ \
   tuned/devices/ \
   tuned/*.sh \
   tuned/requirements-build-cuda13x.txt \

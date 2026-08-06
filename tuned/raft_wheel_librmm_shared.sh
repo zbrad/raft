@@ -1,6 +1,6 @@
 #!/bin/bash
 # raft_wheel_librmm_shared.sh — build librmm-cu13 + rmm-cu13 ONCE, shared
-# across every GPU-architecture variant (gb10/rtx40xx/rtx50xx), and publish
+# across every GPU-architecture variant (gb10/rtx40/rtx50), and publish
 # them to their own GitHub release.
 #
 # Why shared, not per-variant: librmm.so and rmm's compiled Cython
@@ -21,7 +21,7 @@
 # This is safe as long as nothing else in the target environment hard-
 # requires upstream's plain librmm/rmm at a conflicting version -- see
 # raft_wheel_common.sh's validate_wheels() for the automated check that
-# verifies this, and raft_wheel_rtx50xx.sh's raft-dask section for why
+# verifies this, and raft_wheel_rtx50.sh's raft-dask section for why
 # ucxx (previously the one thing that did conflict) is excluded rather
 # than accommodated.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -33,10 +33,10 @@ source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 # Any already-built variant's build dir works interchangeably as the
 # source of RMM_SRC -- the CPM-fetched RMM commit is driven by
 # rapids-cmake/the raft commit, not by GPU arch flags, so it does not
-# vary across gb10/rtx40xx/rtx50xx. Override with e.g.
-# `SOURCE_ARCH=gb10 bash tuned/raft_wheel_librmm_shared.sh` if rtx50xx hasn't
+# vary across gb10/rtx40/rtx50. Override with e.g.
+# `SOURCE_ARCH=gb10 bash tuned/raft_wheel_librmm_shared.sh` if rtx50 hasn't
 # been built on this machine.
-SOURCE_ARCH="${SOURCE_ARCH:-rtx50xx}"
+SOURCE_ARCH="${SOURCE_ARCH:-rtx50}"
 SOURCE_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${SOURCE_ARCH}"
 [[ -d "${SOURCE_BUILD_DIR}" ]] || {
     echo "ERROR: ${SOURCE_BUILD_DIR} not found -- build ${SOURCE_ARCH} first" \
@@ -122,7 +122,7 @@ echo "librmm wheel: $(basename "${LIBRMM_WHEEL}") ($(du -sh "${LIBRMM_WHEEL}" | 
 
 # ── rmm-cuXX (plain, no variant suffix) ───────────────────────────────────
 # Real compile (Cython extensions), not an extract-a-prebuilt-.so step --
-# see raft_wheel_rtx50xx.sh's earlier version of this comment (now
+# see raft_wheel_rtx50.sh's earlier version of this comment (now
 # removed from there) for the CMakeLists.txt reasoning.
 stage_package_source "${RMM_SRC}" "rmm" "${WHEEL_SRC_RMM}"
 RMM_STAGED="${WHEEL_SRC_RMM}/python/rmm"
@@ -154,7 +154,7 @@ RELEASE_NOTES_ARG=()
 if [[ -f "${RELEASE_NOTES}" ]]; then
     RELEASE_NOTES_ARG=(--notes-file "${RELEASE_NOTES}")
 else
-    RELEASE_NOTES_ARG=(--notes "librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40xx/rtx50xx); consumed by each variant's own libraft/pylibraft/raft-dask release.")
+    RELEASE_NOTES_ARG=(--notes "librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40/rtx50); consumed by each variant's own libraft/pylibraft/raft-dask release.")
 fi
 
 echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."

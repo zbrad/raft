@@ -1,7 +1,7 @@
 # Python build requirements for RAFT on any CUDA 13.x toolkit (aarch64 DGX
-# Spark / GB10, and x86_64 RTX 40xx / RTX 50xx). Renamed from
+# Spark / GB10, and x86_64 RTX 40 / RTX 50). Renamed from
 # requirements-build-cuda132.txt: nothing in here is pinned to a specific
-# CUDA *minor* version -- gb10/rtx40xx/rtx50xx's raft_env_*.sh scripts all
+# CUDA *minor* version -- gb10/rtx40/rtx50's raft_env_*.sh scripts all
 # auto-detect and build against the highest installed toolkit (13.2, 13.3,
 # ...), so a filename naming one specific minor version was misleading.
 # "13x" (not bare "13") matches this repo's existing cupy-cuda13x convention

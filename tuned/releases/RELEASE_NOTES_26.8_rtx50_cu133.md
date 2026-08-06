@@ -1,8 +1,8 @@
 # RAFT 26.8 — RTX 50xx Release Notes
 
 **Release Date**: 2026-07-27
-**Package**: `raft-26.8-x86_64-cuda133-rtx50xx.tar.bz2`
-**Wheels**: `libraft-rtx50xx-cu13`, `pylibraft-rtx50xx-cu13`, `raft-dask-rtx50xx-cu13` (+ bundled `librmm-cu13`/`rmm-cu13`)
+**Package**: `raft-26.8-x86_64-cuda133-rtx50.tar.bz2`
+**Wheels**: `libraft-rtx50-cu13`, `pylibraft-rtx50-cu13`, `raft-dask-rtx50-cu13` (+ bundled `librmm-cu13`/`rmm-cu13`)
 **Platform**: x86_64
 **GPU Architecture**: SM_120a (RTX 50xx / Blackwell, consumer)
 
@@ -20,7 +20,7 @@ family-specific accelerated ISA extension, unlike datacenter-class
 Blackwell chips. That assumption was wrong: `sm_120a` is a real,
 NVIDIA-documented target for RTX 5090/5080/5070/etc., exposing
 accelerated tensor-core instructions (e.g. FP4 support) not available
-under bare `sm_120`. This release corrects `tuned/devices/rtx50xx.conf`
+under bare `sm_120`. This release corrects `tuned/devices/rtx50.conf`
 to target `sm_120a` and rebuilds from that corrected value —
 `gpu_tuned_verify_arch` confirms the shipped `.so` is `sm_120a`, not
 `sm_120`.
@@ -72,8 +72,8 @@ to target `sm_120a` and rebuilds from that corrected value —
 
 ### Extract the Package
 ```bash
-tar -xjf raft-26.8-x86_64-cuda133-rtx50xx.tar.bz2
-cd raft-26.8-x86_64-cuda133-rtx50xx
+tar -xjf raft-26.8-x86_64-cuda133-rtx50.tar.bz2
+cd raft-26.8-x86_64-cuda133-rtx50
 ```
 
 ### Set Up Environment
@@ -96,7 +96,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 ```bash
 mkdir build && cd build
 cmake \
-  -DCMAKE_PREFIX_PATH=/path/to/raft-26.8-x86_64-cuda133-rtx50xx \
+  -DCMAKE_PREFIX_PATH=/path/to/raft-26.8-x86_64-cuda133-rtx50 \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
   -DCMAKE_CUDA_ARCHITECTURES=120a \
@@ -106,7 +106,7 @@ make -j$(nproc)
 
 ### Install via wheels instead
 ```bash
-pip install libraft-rtx50xx-cu13 pylibraft-rtx50xx-cu13 raft-dask-rtx50xx-cu13
+pip install libraft-rtx50-cu13 pylibraft-rtx50-cu13 raft-dask-rtx50-cu13
 ```
 
 ## Compatibility
@@ -120,12 +120,12 @@ pip install libraft-rtx50xx-cu13 pylibraft-rtx50xx-cu13 raft-dask-rtx50xx-cu13
 
 ### Verify Integrity
 ```bash
-sha256sum -c CHECKSUMS_rtx50xx
+sha256sum -c CHECKSUMS_rtx50
 ```
 
 ---
 
 **RAFT Version**: 26.8
 **Release Date**: 2026-07-27
-**Package**: raft-26.8-x86_64-cuda133-rtx50xx.tar.bz2
+**Package**: raft-26.8-x86_64-cuda133-rtx50.tar.bz2
 **Platform**: x86_64 / SM_120a / CUDA 13.3

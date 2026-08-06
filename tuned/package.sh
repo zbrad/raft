@@ -1,7 +1,7 @@
 #!/bin/bash
 # package.sh <variant> — package the given GPU variant's C++
 # install tree as a tarball. Shared implementation behind every
-# gb10/rtx40xx/rtx50xx raft_package_<variant>.sh wrapper.
+# gb10/rtx40/rtx50 raft_package_<variant>.sh wrapper.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 GPU_TUNED_ARG_VARIANT="$1"

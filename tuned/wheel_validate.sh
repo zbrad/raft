@@ -3,12 +3,12 @@
 # wheels into a fresh scratch venv and exercise the actual compiled
 # extensions (not just import them). Run after wheel.sh, before
 # publishing. Shared implementation behind every
-# gb10/rtx40xx/rtx50xx raft_wheel_validate_<variant>.sh wrapper.
+# gb10/rtx40/rtx50 raft_wheel_validate_<variant>.sh wrapper.
 #
 # This is the concrete implementation of the "install into a scratch venv
-# and import pylibraft" verification step from the original rtx50xx task
+# and import pylibraft" verification step from the original rtx50 task
 # list -- formalized as its own script after doing it ad hoc caught a real
-# bug: libraft-rtx50xx-cu13's own dependency on librmm==26.8.* pulled in
+# bug: libraft-rtx50-cu13's own dependency on librmm==26.8.* pulled in
 # an ABI-mismatched upstream librmm (raft's C++ build fetches a newer RMM
 # via CPM than that pin expects), which only surfaced as
 # "undefined symbol: ...pool_memory_resource_impl..." when something

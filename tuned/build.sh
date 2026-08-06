@@ -1,7 +1,7 @@
 #!/bin/bash
 # build.sh <variant> — build libraft + tests for the given GPU
-# variant (gb10/rtx40xx/rtx50xx). Shared implementation behind every
-# gb10/rtx40xx/rtx50xx raft_build_<variant>.sh wrapper.
+# variant (gb10/rtx40/rtx50). Shared implementation behind every
+# gb10/rtx40/rtx50 raft_build_<variant>.sh wrapper.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 GPU_TUNED_ARG_VARIANT="$1"

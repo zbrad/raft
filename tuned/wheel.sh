@@ -1,10 +1,10 @@
 #!/bin/bash
 # wheel.sh <variant> — build libraft-<variant>-cuXX +
 # pylibraft-<variant>-cuXX + raft-dask-<variant>-cuXX wheels for the given
-# GPU variant (gb10/rtx40xx/rtx50xx) and package them for release,
+# GPU variant (gb10/rtx40/rtx50) and package them for release,
 # alongside copies of the shared librmm-cu13/rmm-cu13 wheels (built once
 # by raft_wheel_librmm_shared.sh -- run that first). Shared implementation
-# behind every gb10/rtx40xx/rtx50xx raft_wheel_<variant>.sh wrapper.
+# behind every gb10/rtx40/rtx50 raft_wheel_<variant>.sh wrapper.
 #
 # Each package is built from a per-variant staging copy under
 # cpp/build-<variant>/wheel-src/ (see raft_wheel_common.sh) instead of
@@ -79,7 +79,7 @@ RMM_WHEEL="$(ls "${DIST_DIR}"/rmm_*.whl | head -1)"
 # Without this, whatever rmm-cu13/librmm-cu13 happens to already be
 # installed (a stale nightly, an old leftover, or nothing at all) silently
 # wins instead of the version raft's own C++ build actually resolved --
-# confirmed empirically on rtx40xx: raft-dask compiled against a stale
+# confirmed empirically on rtx40: raft-dask compiled against a stale
 # nightly's headers and failed at import with `undefined symbol:
 # rmm::_RMM_26_8::device_buffer::~device_buffer()` even though that same
 # build's own libraft/pylibraft (26.10) worked fine. --force-reinstall

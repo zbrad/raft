@@ -1,9 +1,9 @@
 #!/bin/bash
 # env.sh <variant> — detect CUDA installation and export common
-# env vars for a given GPU variant (gb10/rtx40xx/rtx50xx). Source this
+# env vars for a given GPU variant (gb10/rtx40/rtx50). Source this
 # file with the variant as $1; do not execute it directly.
 #
-# This is the shared implementation behind every gb10/rtx40xx/rtx50xx
+# This is the shared implementation behind every gb10/rtx40/rtx50
 # raft_env_<variant>.sh wrapper (each just does
 # `source tuned/env.sh <variant>`). Formerly three
 # byte-identical copies of this detection logic with only variable names
@@ -21,12 +21,12 @@
 
 GPU_TUNED_ARG_VARIANT="$1"
 if [[ -z "${GPU_TUNED_ARG_VARIANT}" ]]; then
-    echo "ERROR: env.sh requires a variant argument (gb10/rtx40xx/rtx50xx)" >&2
+    echo "ERROR: env.sh requires a variant argument (gb10/rtx40/rtx50)" >&2
     return 1 2>/dev/null || exit 1
 fi
 
 GPU_TUNED_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=devices/rtx50xx.conf
+# shellcheck source=devices/rtx50.conf
 source "${GPU_TUNED_SELF_DIR}/devices/${GPU_TUNED_ARG_VARIANT}.conf" || return 1 2>/dev/null || exit 1
 export GPU_TUNED_VARIANT GPU_TUNED_PLATFORM GPU_TUNED_CUDA_ARCH GPU_TUNED_HW_LABEL GPU_TUNED_DEVICE_LABEL
 

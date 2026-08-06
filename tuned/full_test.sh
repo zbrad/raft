@@ -4,7 +4,7 @@
 # targeted checks in regression_test.sh. Slower and
 # comprehensive; run this before a release, not on every iteration.
 # Shared implementation behind every
-# gb10/rtx40xx/rtx50xx raft_full_test_<variant>.sh wrapper.
+# gb10/rtx40/rtx50 raft_full_test_<variant>.sh wrapper.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 GPU_TUNED_ARG_VARIANT="$1"

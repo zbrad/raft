@@ -1,7 +1,7 @@
 #!/bin/bash
 # raft_wheel_common.sh — shared helpers for generating per-variant wheel
 # build sources without ever modifying git-tracked files. Sourced by
-# gb10/rtx40xx/rtx50xx's raft_wheel_*.sh scripts.
+# gb10/rtx40/rtx50's raft_wheel_*.sh scripts.
 #
 # Design: instead of sed -i'ing pyproject.toml/dependencies.yaml/VERSION
 # in place and reverting via a trap on script exit (the previous
@@ -266,7 +266,7 @@ stage_repo_root_refs() {
 # hw_label (optional, defaults to the bare variant if omitted) makes the
 # binary self-describing about WHICH hardware it targets, not just its
 # internal codename -- e.g. "RTX 50-series (Blackwell consumer,
-# desktop/laptop, SM 120a)" rather than just "rtx50xx". Without this, the
+# desktop/laptop, SM 120a)" rather than just "rtx50". Without this, the
 # only human-readable description of scope lived in the GitHub release's
 # own title text, which goes stale independently of the binary.
 embed_build_info() {
@@ -300,9 +300,9 @@ embed_build_info() {
 #
 # Collision strategy: libraft/pylibraft/raft-dask genuinely differ per
 # GPU architecture (real device code), so their PyPI *distribution* names
-# stay variant-suffixed (libraft-rtx50xx-cu13 etc) -- but the importable
+# stay variant-suffixed (libraft-rtx50-cu13 etc) -- but the importable
 # Python package is left unrenamed ("libraft" in site-packages, not
-# "libraft_rtx50xx"). Renaming the import package too was tried and
+# "libraft_rtx50"). Renaming the import package too was tried and
 # reverted -- it just pushes the identical collision one level up to
 # whatever else does `import librmm`. Instead we follow PyTorch's own
 # precedent for this exact problem (multiple ABI-incompatible builds --
@@ -340,7 +340,7 @@ embed_build_info() {
 # in their own metadata) are excluded from raft-dask entirely rather than
 # accommodated: traced their C++ side and confirmed raft-dask's own
 # compiled extensions never actually link against ucxx (see
-# raft_wheel_rtx50xx.sh's raft-dask section), so there was nothing to
+# raft_wheel_rtx50.sh's raft-dask section), so there was nothing to
 # preserve by keeping the dependency.
 validate_wheels() {
     local dist_dir="$1" python_version="$2" variant="$3"
@@ -402,7 +402,7 @@ def check_loaded_variant(soname_fragment):
     with open('/proc/self/maps') as f:
         maps = f.read()
     # Anchored on '/' immediately before the fragment so it matches only
-    # the BASENAME (e.g. libraft_rtx50xx_cu133.so) -- a bare substring
+    # the BASENAME (e.g. libraft_rtx50_cu133.so) -- a bare substring
     # search also matches unrelated paths like pylibraft/common/cuda.abi3.so
     # (contains \"libraft\" inside \"pylibraft\"), confirmed empirically.
     paths = sorted(set(re.findall(r'(\S*/' + re.escape(soname_fragment) + r'[^/\s]*\.so\S*)', maps)))

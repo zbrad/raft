@@ -9,7 +9,7 @@
 #   - GPU snapshot (VRAM used, temp, power) before and after each binary
 #
 # Usage:  bash tuned/raft_full_test_monitored.sh <variant>
-#   variant: rtx50xx | rtx40xx | gb10
+#   variant: rtx50 | rtx40 | gb10
 #
 # If WSL crashes mid-run, the last ">>> START" without a "<<< PASS/FAIL"
 # in -run.log identifies the culprit binary.
