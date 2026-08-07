@@ -1,7 +1,7 @@
 # RAFT 26.8 — GB10 / DGX Spark Release Notes
 
-**Release Date**: 2026-08-05
-**Package**: `raft-26.8-aarch64-cuda133-gb10.tar.bz2`
+**Release Date**: 2026-08-07
+**Package**: `raft-26.8-gb10-cu133.tar.bz2`
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
 
@@ -21,17 +21,31 @@ No architecture correction was needed for this release: unlike rtx50
 (which was rebuilt this cycle after discovering it had shipped on bare
 `sm_120` instead of `sm_120a`), GB10's `tuned/devices/gb10.conf` has
 targeted `sm_121a` all along — confirmed again here via `cuobjdump`
-against this build's `libraft.so` (`sm_121a` cubins, not `sm_121`).
+against this build's `libraft-gb10-cu133.so` (`sm_121a` cubins, not
+`sm_121`).
 
 ## What's New in the Publish Pipeline
 
 Since GB10's last release, the shared `tuned/` tooling picked up:
 
+- **Variant-qualified library naming** — `libraft.so` is now
+  `libraft-<variant>-<cuda_tag>.so` (e.g. `libraft-gb10-cu133.so`),
+  matching the convention `zbrad/cuvs` already uses for its own
+  `libcuvs-<variant>-<cuda_tag>.so`. A new `RAFT_OUTPUT_NAME` CMake
+  override on the `raft_lib` target makes this possible; previously every
+  variant built a same-named `libraft.so`, which could collide if
+  multiple variants' installs ever landed in the same prefix.
+- **Release tag convention unified with cuvs** — tags are now
+  `v<short_ver>-<variant>-<cuda_tag>` (this release: `v26.8-gb10-cu133`),
+  matching cuvs's own tag order exactly. Previously raft's tags put the
+  CUDA tag *before* the variant (`v26.8.0-cuda133-gb10`) — the two repos'
+  schemes were never unified until now, only the device short-names
+  (`gb10`/`rtx40`/`rtx50`) were.
 - **Build-info stamping on the tarball itself, not just the wheel**
   (previously `tuned/wheel.sh`'s `embed_build_info` only ever stamped its
   own staged copy for the pip wheel; `tuned/package.sh`'s separate tarball
-  copy shipped with no stamp at all). This tarball's `libraft.so` now
-  carries variant, version, hardware label, and build timestamp in a
+  copy shipped with no stamp at all). This tarball's `libraft-gb10-cu133.so`
+  now carries variant, version, hardware label, and build timestamp in a
   dedicated ELF section.
 - **`--target tuned-builds` fix** in the release-publish scripts — they
   had hardcoded the old `native-builds` branch name (renamed
@@ -44,6 +58,16 @@ Since GB10's last release, the shared `tuned/` tooling picked up:
 
 No `cpp/` source changes landed for GB10 in this cycle — this release is
 tooling/publish-pipeline maturity, not an algorithm or bug-fix release.
+
+## Downstream Impact
+
+`zbrad/cuvs`'s `tuned/build.sh` now consumes this exact release directly
+(via a new `resolve_raft_release()` step that fetches + extracts it onto
+`CMAKE_PREFIX_PATH`), instead of CPM-cloning and building upstream
+`rapidsai/raft`'s `main` branch from source as part of its own build. This
+cuts real, redundant compile time out of every cuvs tuned build and pins
+cuvs to a known, published raft build rather than whatever `main` happens
+to be at build time.
 
 ## Build Environment
 
@@ -73,7 +97,7 @@ tooling/publish-pipeline maturity, not an algorithm or bug-fix release.
 ## Package Contents
 
 ### Shared Libraries (lib/)
-- `libraft.so` — RAFT runtime library, built for SM_121a
+- `libraft-gb10-cu133.so` — RAFT runtime library, built for SM_121a
 - `librmm.so` — RAPIDS Memory Manager (CPM-fetched by raft's own build)
 - `librapids_logger.so` — Logging utilities
 
@@ -91,8 +115,8 @@ tooling/publish-pipeline maturity, not an algorithm or bug-fix release.
 
 ### Extract the Package
 ```bash
-tar -xjf raft-26.8-aarch64-cuda133-gb10.tar.bz2
-cd raft-26.8-aarch64-cuda133-gb10
+tar -xjf raft-26.8-gb10-cu133.tar.bz2
+cd raft-26.8-gb10-cu133
 ```
 
 ### Set Up Environment
@@ -115,7 +139,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 ```bash
 mkdir build && cd build
 cmake \
-  -DCMAKE_PREFIX_PATH=/path/to/raft-26.8-aarch64-cuda133-gb10 \
+  -DCMAKE_PREFIX_PATH=/path/to/raft-26.8-gb10-cu133 \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
   -DCMAKE_CUDA_ARCHITECTURES=121a \
@@ -133,10 +157,13 @@ separately — see
 ### API Stability
 - **C++ API**: Stable, matches raft's own 26.08.00 release (no `cpp/`
   changes this cycle)
-- **CMake Targets**: Stable
+- **CMake Targets**: Stable — consumers use `find_package(raft)` +
+  `raft::raft`, unaffected by the `.so` filename change
 - **Binary Compatibility**: New build; recompile downstream projects
-  against this artifact rather than relying on binary compatibility with
-  the July 7 wheels-only release.
+  against this artifact. Note the library filename itself changed
+  (`libraft.so` → `libraft-gb10-cu133.so`) — anything linking against the
+  bare filename directly (rather than through the CMake target) needs
+  updating.
 
 ### Verify Integrity
 ```bash
@@ -146,6 +173,6 @@ sha256sum -c CHECKSUMS_gb10
 ---
 
 **RAFT Version**: 26.8
-**Release Date**: 2026-08-05
-**Package**: raft-26.8-aarch64-cuda133-gb10.tar.bz2
+**Release Date**: 2026-08-07
+**Package**: raft-26.8-gb10-cu133.tar.bz2
 **Platform**: aarch64 / SM_121a / CUDA 13.3
