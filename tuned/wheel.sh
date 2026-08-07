@@ -119,8 +119,10 @@ patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
     "pylibraft/raft-dask's rmm (python) dependency (version)"
 
 # ── 1. Build libraft-<variant>-cuXX ───────────────────────────────────────────
-# Strategy: pre-place libraft.so from the existing cmake install into the
-# staged Python package directory (libraft/lib64/), same as before.
+# Strategy: pre-place lib<RAFT_LIB_NAME>.so (this build dir's tuned,
+# variant-qualified install -- see RAFT_LIB_NAME below) from the existing
+# cmake install into the staged Python package directory (libraft/lib64/),
+# same as before.
 #
 # Renamed to libraft-<variant> (was bare "libraft") so this variant-only,
 # single-arch build can never collide with upstream RAPIDS' real multi-arch
@@ -141,17 +143,22 @@ patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
 stage_package_source "${PROJECT_ROOT}" "libraft" "${WHEEL_SRC}"
 LIBRAFT_STAGED="${WHEEL_SRC}/python/libraft"
 LIBRAFT_SONAME="libraft_${GPU_TUNED_VARIANT}_cu${CUDA_VERSION_COMPACT}.so"
+# Matches tuned/build.sh's RAFT_LIB_NAME (-DRAFT_OUTPUT_NAME=... baked into
+# this shared build dir's CMakeCache at configure time) -- `cmake --install`
+# below installs lib<this>.so, not the bare "libraft.so" upstream would
+# otherwise produce.
+RAFT_LIB_NAME="raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 
-echo "Extracting libraft.so from existing cmake install (no recompile)..."
+echo "Extracting lib${RAFT_LIB_NAME}.so from existing cmake install (no recompile)..."
 mkdir -p "${LIBRAFT_STAGED}/libraft/lib64"
 rm -rf "/tmp/raft-${GPU_TUNED_VARIANT}-install"
 cmake --install "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}" --prefix "/tmp/raft-${GPU_TUNED_VARIANT}-install"
-if [[ ! -f "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/libraft.so" ]]; then
-    echo "ERROR: cmake --install did not produce libraft.so" >&2
+if [[ ! -f "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" ]]; then
+    echo "ERROR: cmake --install did not produce lib${RAFT_LIB_NAME}.so" >&2
     exit 1
 fi
-gpu_tuned_verify_arch "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/libraft.so" || exit 1
-cp "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/libraft.so" "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}"
+gpu_tuned_verify_arch "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" || exit 1
+cp "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}"
 rm -rf "/tmp/raft-${GPU_TUNED_VARIANT}-install"
 embed_build_info "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}" "${GPU_TUNED_VARIANT}" "libraft" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "${GPU_TUNED_HW_LABEL}"
 

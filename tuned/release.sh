@@ -10,11 +10,23 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 cd "${PROJECT_ROOT}"
 
-VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
-# Derive short version (e.g. 26.06.00 -> 26.6)
+# tr -d '\r': matches tuned/package.sh's own defensive strip (see that
+# file's comment) -- must compute VERSION identically here since this
+# script doesn't rebuild/repackage, it just publishes whatever
+# tuned/package.sh already produced under this exact name.
+VERSION="$(tr -d '\r' < "${PROJECT_ROOT}/VERSION")"
+# Derive short version (e.g. 26.08.00 -> 26.8) -- raft's own long-standing
+# convention (older tags, RELEASE_NOTES_26.8_*.md); must match
+# tuned/package.sh's own SHORT_VER computation exactly.
 SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
-PKG_NAME="raft-${SHORT_VER}-cuda${CUDA_VERSION_COMPACT}-${GPU_TUNED_VARIANT}"
-RELEASE_TAG="v${SHORT_VER}.0-cuda${CUDA_VERSION_COMPACT}-${GPU_TUNED_VARIANT}"
+# <short_ver>-<variant>-<cuda_tag>: variant-then-cuda_tag order matches
+# zbrad/cuvs's release-tag order (v${CUVS_VERSION}-${GPU_TUNED_VARIANT}-
+# ${CUDA_TAG} there); short (not full) version is raft's own convention.
+# Must match tuned/package.sh's own PKG_NAME computation exactly
+# (independent, not passed between the two scripts -- same pattern as
+# RELEASE_NOTES_FILE below).
+PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
+RELEASE_TAG="v${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 # Canonical release-notes filename (WITH the _cu<N> suffix, since the CUDA
 # minor version varies release to release and shouldn't be left implicit)
 # -- wheel.sh derives this identically, independently (they're

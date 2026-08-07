@@ -114,8 +114,12 @@ fi
 CUDA_VERSION="$("${CUDA_HOME}/bin/nvcc" --version \
     | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
 CUDA_VERSION_COMPACT="${CUDA_VERSION//./}"
+# "cu133" form, matching zbrad/cuvs's tuned/env.sh CUDA_TAG convention --
+# used to name this build's own output (see tuned/build.sh's
+# RAFT_LIB_NAME) the same way cuvs names its libcuvs-<variant>-<tag>.so.
+CUDA_TAG="${CUDA_TAG:-cu${CUDA_VERSION_COMPACT}}"
 
-export CUDA_HOME CUDA_VERSION CUDA_VERSION_COMPACT
+export CUDA_HOME CUDA_VERSION CUDA_VERSION_COMPACT CUDA_TAG
 
 # Prepend CUDA bin to PATH if not already present.
 case ":${PATH}:" in

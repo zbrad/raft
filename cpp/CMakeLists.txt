@@ -322,6 +322,15 @@ if(RAFT_COMPILE_LIBRARY)
                INTERFACE_POSITION_INDEPENDENT_CODE ON
   )
 
+  # Fork-specific override for tuned single-arch builds (gb10/rtx40/rtx50),
+  # matching zbrad/cuvs's CUVS_OUTPUT_NAME: -DRAFT_OUTPUT_NAME=raft-gb10-cu133
+  # -> libraft-gb10-cu133.so, so builds for different GPU variants can't
+  # collide under the same filename when installed side by side. Shared
+  # (raft_lib) only, same as cuvs only renaming its own main shared target.
+  if(DEFINED RAFT_OUTPUT_NAME)
+    set_target_properties(raft_lib PROPERTIES OUTPUT_NAME "${RAFT_OUTPUT_NAME}")
+  endif()
+
   list(APPEND _raft_lib_targets raft_objs)
   foreach(target IN LISTS _raft_lib_targets)
     target_link_libraries(
