@@ -149,18 +149,30 @@ gpu_tuned_verify_cuda_compat() {
 }
 
 # gpu_tuned_embed_build_info <so-or-bin-path> <variant> <package> <version>
-# [hw-label] [repo-url] — embeds a greppable build-info string into a
-# custom ELF section (named .<package>_build_info, non-alnum chars in
-# <package> replaced with '_') on the given file, readable later via
-# `readelf -p .<package>_build_info <file>` or plain `strings`. Safe at
-# runtime: a custom section with no program-header entry is simply
-# ignored by the dynamic loader. Idempotent: strips any prior stamp of
-# the same section name first (re-running --add-section on an existing
-# section name empirically corrupts objcopy's own in-place rewrite).
+# [hw-label] [repo-url] [section-name] — embeds a greppable build-info
+# string into a custom ELF section on the given file, readable later via
+# `readelf -p <section> <file>` or plain `strings`. Safe at runtime: a
+# custom section with no program-header entry is simply ignored by the
+# dynamic loader. Idempotent: strips any prior stamp of the same section
+# name first (re-running --add-section on an existing section name
+# empirically corrupts objcopy's own in-place rewrite).
+#
+# Section defaults to .<package>_build_info (non-alnum chars in <package>
+# replaced with '_') -- pass [section-name] explicitly (with or without
+# the leading '.') to override, e.g. when several different packages
+# must all land in the SAME fixed section for a downstream consumer that
+# greps one constant name (see zbrad/raft's raft_wheel_common.sh, which
+# stamps both libraft and librmm into .raft_build_info regardless of
+# which package is being stamped).
 gpu_tuned_embed_build_info() {
-    local target="$1" variant="$2" package="$3" version="$4" hw_label="${5:-${2}}" repo_url="${6:-}"
+    local target="$1" variant="$2" package="$3" version="$4" hw_label="${5:-${2}}" repo_url="${6:-}" section_override="${7:-}"
     local section tmp
-    section=".$(printf '%s' "${package}" | tr -c 'A-Za-z0-9' '_')_build_info"
+    if [ -n "${section_override}" ]; then
+        section="${section_override}"
+        [[ "${section}" == .* ]] || section=".${section}"
+    else
+        section=".$(printf '%s' "${package}" | tr -c 'A-Za-z0-9' '_')_build_info"
+    fi
     tmp="$(mktemp)"
     {
         printf '%s-%s build: %s v%s (%s)' "${package}" "${variant}" "${package}" "${version}" "${hw_label}"

@@ -3,6 +3,16 @@
 # build sources without ever modifying git-tracked files. Sourced by
 # gb10/rtx40/rtx50's raft_wheel_*.sh scripts.
 #
+# Self-sources tuned/common.sh (zbrad/tuned-common, vendored) directly
+# rather than relying on the caller having already sourced tuned/env.sh
+# first -- raft_wheel_librmm_shared.sh sources this file WITHOUT going
+# through env.sh at all (librmm has no arch-specific build, so it never
+# needed the device-config setup env.sh provides), so embed_build_info
+# below can't assume gpu_tuned_embed_build_info is already in scope.
+RAFT_WHEEL_COMMON_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${RAFT_WHEEL_COMMON_SELF_DIR}/common.sh" || exit 1
+#
 # Design: instead of sed -i'ing pyproject.toml/dependencies.yaml/VERSION
 # in place and reverting via a trap on script exit (the previous
 # approach -- fragile in practice: an EXIT trap set by a later package's
@@ -248,40 +258,18 @@ stage_repo_root_refs() {
     ln -sfn "${project_root}/cpp" "${staging_root}/cpp"
 }
 
-# embed_build_info <so_path> <variant> <package> <version> [hw_label]
-# Embeds a greppable build-info string into a custom ELF section
-# (.raft_build_info) on the given .so -- readable later via
-# `readelf -p .raft_build_info <so>`, plain `strings`, or a byte-scan
-# (see validate_wheels' check_loaded_variant below). Safe at runtime: a
-# custom section with no program-header entry is simply ignored by the
-# dynamic loader, same technique already used in raft_build_*.sh's
-# archival .so copy.
-#
-# This is what lets validate_wheels() confirm the ACTUAL library that
-# won the site-packages/ install collision (if any) really is this
-# variant's build -- not just that the right distribution's RECORD
-# metadata got installed. Must be called on the exact .so file that ends
-# up staged into the wheel, not a separate archival copy.
-#
-# hw_label (optional, defaults to the bare variant if omitted) makes the
-# binary self-describing about WHICH hardware it targets, not just its
-# internal codename -- e.g. "RTX 50-series (Blackwell consumer,
-# desktop/laptop, SM 120a)" rather than just "rtx50". Without this, the
-# only human-readable description of scope lived in the GitHub release's
-# own title text, which goes stale independently of the binary.
+# embed_build_info <so_path> <variant> <package> <version> [hw_label] —
+# thin wrapper over gpu_tuned_embed_build_info (common.sh) that pins the
+# section name to .raft_build_info (via the explicit [section-name]
+# override) regardless of which package (libraft, librmm, ...) is being
+# stamped -- deliberately the SAME section every time, since
+# validate_wheels' check_loaded_variant greps for that one fixed name
+# across different libraries -- while keeping each call site's real
+# package name in the message.
 embed_build_info() {
-    local so_path="$1" variant="$2" package="$3" version="$4" hw_label="${5:-${2}}"
-    local tmp
-    tmp="$(mktemp)"
-    echo "raft-${variant} build: ${package} v${version} (${hw_label}), https://github.com/zbrad/raft, built $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${tmp}"
-    # Idempotent: objcopy --add-section on a section name that already
-    # exists (e.g. rebuilding without a clean) empirically corrupts its own
-    # in-place rewrite ("file format not recognized" on its own temp
-    # output) -- strip any prior stamp first. Same fix as zbrad/cuvs's and
-    # zbrad/faiss's tuned/env.sh, hit for real running a live verification.
-    objcopy --remove-section .raft_build_info "${so_path}" 2>/dev/null || true
-    objcopy --add-section .raft_build_info="${tmp}" "${so_path}"
-    rm -f "${tmp}"
+    local so_path="$1" variant="$2" package="$3" version="$4" hw_label="$5"
+    gpu_tuned_embed_build_info "${so_path}" "${variant}" "${package}" "${version}" \
+        "${hw_label}" "https://github.com/zbrad/raft" "raft_build_info"
 }
 
 # validate_wheels <dist_dir> <python_version> <variant>
