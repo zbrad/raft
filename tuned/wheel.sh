@@ -157,7 +157,7 @@ if [[ ! -f "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" ]
     echo "ERROR: cmake --install did not produce lib${RAFT_LIB_NAME}.so" >&2
     exit 1
 fi
-gpu_tuned_verify_arch "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" || exit 1
+gpu_tuned_verify_arch "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 cp "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}"
 rm -rf "/tmp/raft-${GPU_TUNED_VARIANT}-install"
 embed_build_info "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}" "${GPU_TUNED_VARIANT}" "libraft" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "${GPU_TUNED_HW_LABEL}"

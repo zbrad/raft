@@ -30,36 +30,25 @@ GPU_TUNED_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${GPU_TUNED_SELF_DIR}/devices/${GPU_TUNED_ARG_VARIANT}.conf" || return 1 2>/dev/null || exit 1
 export GPU_TUNED_VARIANT GPU_TUNED_PLATFORM GPU_TUNED_CUDA_ARCH GPU_TUNED_HW_LABEL GPU_TUNED_DEVICE_LABEL
 
+# shellcheck source=common.sh
+# Vendored from https://github.com/zbrad/tuned-common (pinned commit --
+# see common.sh's own header/sync instructions to update). Provides
+# gpu_tuned_verify_arch/verify_cuda_compat/assert_platform, shared
+# verbatim across the fleet instead of hand-copied-and-edited per repo.
+# NOT used for embed_build_info here: raft deliberately stamps every
+# package (libraft, librmm, ...) into the SAME .raft_build_info section
+# rather than one section per package (see raft_wheel_common.sh's own
+# embed_build_info -- validate_wheels depends on that section name being
+# constant), which doesn't fit the shared function's one-section-per-
+# package design -- kept as its own local definition on purpose.
+source "${GPU_TUNED_SELF_DIR}/common.sh" || return 1 2>/dev/null || exit 1
+
 # Fail loudly if this script is run on the wrong host, rather than letting
 # a mismatched build silently produce wrong-architecture binaries that
 # only surface as a confusing failure several steps later (gpu_tuned_verify_arch
 # below catches the compiled-.so case; this catches it even earlier, before
 # any compilation happens at all).
-if [[ "$(uname -m)" != "${GPU_TUNED_PLATFORM}" ]]; then
-    echo "ERROR: env.sh: expected platform '${GPU_TUNED_PLATFORM}' for" \
-         "variant '${GPU_TUNED_VARIANT}', but uname -m reports '$(uname -m)'." >&2
-    return 1 2>/dev/null || exit 1
-fi
-
-# gpu_tuned_verify_arch <path-to-.so> — assert a compiled library's
-# embedded cubins are exactly sm_${GPU_TUNED_CUDA_ARCH} (via cuobjdump),
-# catching a build silently produced against the wrong
-# CMAKE_CUDA_ARCHITECTURES (e.g. a stale build directory left over from a
-# different variant's build).
-gpu_tuned_verify_arch() {
-    local so_file="$1"
-    if [[ ! -f "${so_file}" ]]; then
-        echo "ERROR: gpu_tuned_verify_arch: no such file: ${so_file}" >&2
-        return 1
-    fi
-    local found
-    found="$(cuobjdump --list-elf "${so_file}" 2>/dev/null | grep -oE 'sm_[0-9]+a?' | sort -u)"
-    if [[ "${found}" != "sm_${GPU_TUNED_CUDA_ARCH}" ]]; then
-        echo "ERROR: ${so_file} is not built for sm_${GPU_TUNED_CUDA_ARCH} (found: ${found:-none})" >&2
-        return 1
-    fi
-    echo "Verified: ${so_file} is built for sm_${GPU_TUNED_CUDA_ARCH}"
-}
+gpu_tuned_assert_platform "${GPU_TUNED_PLATFORM}" "${GPU_TUNED_VARIANT}" || return 1 2>/dev/null || exit 1
 
 # Detection order:
 #   1. An explicit caller-supplied CUDA_HOME is always honoured as-is.
