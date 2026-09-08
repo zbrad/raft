@@ -35,9 +35,34 @@ RELEASE_TAG="v${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 # expression, not that one produces it for the other).
 RELEASE_NOTES_FILE="tuned/releases/RELEASE_NOTES_${SHORT_VER}_${GPU_TUNED_VARIANT}_cu${CUDA_VERSION_COMPACT}.md"
 
+# Publish gate: refuse without a fresh, passing full-test-suite run.
+# "Fresh" = newer than the built .so (tuned/build.sh's own output), not
+# just present -- a stale pass from before the last code change would
+# otherwise silently satisfy this check. See tuned/full_test.sh, which
+# writes this file and is the only thing that should.
+TEST_RESULTS_FILE="tuned/releases/TEST_RESULTS_${GPU_TUNED_VARIANT}.log"
+BUILT_LIB="cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_LIB_NAME:-raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}}.so"
+if [[ ! -f "${TEST_RESULTS_FILE}" ]]; then
+  echo "ERROR: ${TEST_RESULTS_FILE} not found -- run tuned/full_test.sh ${GPU_TUNED_VARIANT} first." >&2
+  exit 1
+fi
+if [[ -f "${BUILT_LIB}" && "${BUILT_LIB}" -nt "${TEST_RESULTS_FILE}" ]]; then
+  echo "ERROR: ${BUILT_LIB} is newer than ${TEST_RESULTS_FILE} -- the test results predate the current build." >&2
+  echo "  Re-run tuned/full_test.sh ${GPU_TUNED_VARIANT} before publishing." >&2
+  exit 1
+fi
+if ! grep -q "All binaries passed\." "${TEST_RESULTS_FILE}"; then
+  echo "ERROR: ${TEST_RESULTS_FILE} does not show a clean pass -- not publishing." >&2
+  echo "  Last lines:" >&2
+  tail -20 "${TEST_RESULTS_FILE}" >&2
+  exit 1
+fi
+echo "Test gate: ${TEST_RESULTS_FILE} shows a clean pass, newer than the built library. Proceeding."
+
 gh release create "${RELEASE_TAG}" --repo zbrad/raft \
   "${PKG_NAME}.tar.bz2#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${GPU_TUNED_DEVICE_LABEL})" \
   "tuned/releases/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
+  "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})" \
   --title "RAFT ${SHORT_VER} — ${GPU_TUNED_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH}" \
   --notes-file "${RELEASE_NOTES_FILE}" \
   --target "tuned-builds"
