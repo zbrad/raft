@@ -71,6 +71,7 @@ compile_commands.json
 # raft build artifacts
 raft-*.tar.bz2
 build_*.log
+tuned/releases/TEST_RESULTS_*.log
 .claude/settings.local.json
 .vscode/
 cpp/build*/
