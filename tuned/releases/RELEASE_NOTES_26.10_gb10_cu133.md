@@ -1,69 +1,85 @@
 # RAFT 26.10 — GB10 / DGX Spark Release Notes
 
-**Release Date**: 2026-08-07
-**Package**: `raft-26.10-gb10-cu133.tar.bz2`
+**Release Date**: 2026-09-08
+**Package**: `raft-26.10-gb10-cu133-g37ba10e2.tar.bz2`
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
+**Commit**: [`37ba10e2`](https://github.com/zbrad/raft/commit/37ba10e2)
 
 ## Overview
 
-Follow-up to the [26.8 gb10 release](https://github.com/zbrad/raft/releases/tag/v26.8-gb10-cu133)
-(published 2026-08-07, superseded by this one), picking up real upstream
-`rapidsai/raft` changes that landed between raft's `26.08.00` and
-`26.10.00` versions. `VERSION` bumped to `26.10.00` as a side effect of
-merging `origin/tuned-builds` (which itself periodically merges upstream
-`main`) — this release rebuilds against that merge rather than leaving
-the published gb10 artifact one version behind the checked-out source.
+Rebuild reflecting a real upstream sync (`upstream/main` merge) plus real
+fixes and tooling work from this session — supersedes the previous
+`v26.10-gb10-cu133` release (2026-08-07, deleted; that tag is now
+`v26.10-gb10-cu133-g37ba10e2` — see "Release tag naming" below for why
+future releases won't need to delete history to republish).
 
-No formal changelog exists yet for 26.08/26.10 (`CHANGELOG.md`'s newest
-entry is still `26.06.00`) — the following is compiled directly from
-`git log` between the two version points.
+## What Changed
 
-## What Changed Upstream (26.08.00 → 26.10.00)
+- **Laplacian NZType fix** — `marked_diagonal` in
+  `compute_graph_laplacian` was `device_vector<int>` while
+  `thrust::exclusive_scan` expects `device_vector<NZType>`; the mismatch
+  caused writes to incorrect memory addresses when `NZType` is 64-bit,
+  corrupting the CUDA context on SM_121a with CUDA 13.2+/CCCL 3.4+.
+  Regression test: `ComputeGraphLaplacianCOOLongNZType`. Also submitted
+  upstream: [NVIDIA/raft#3141](https://github.com/NVIDIA/raft/pull/3141).
+- **warpReduce/`raft::add_op` ADL ambiguity — investigated, no raft-side
+  fix needed.** The real fix already landed upstream in **cuvs**, not
+  raft (`rapidsai/cuvs#1963`, March 2026) — a raft-level PR for this
+  (`NVIDIA/raft#3050`) was correctly rejected by a maintainer in July for
+  exactly that reason. See `github-com-zbrad-raft/memory/warp_reduce_pr.md`
+  for the full history if this ever needs re-deriving.
+- **`rapids-cmake` pinned** to a fixed commit
+  (`8fc2d05e4b29a2fb7a355192ce19190fcf24c37f`) instead of the previously
+  unpinned `main` branch — see `tuned/docs/RELEASE_PINS.md` for why (a
+  real `rapids_logger` version mismatch this caused, breaking `zbrad/cuvs`'s
+  configure) and the exact commit/URL this and every future release is
+  built against.
+- **`tuned/regression_test.sh` bug fixed** — was running the laplacian
+  fix's check against `LINALG_TEST`, but that test
+  (`cpp/tests/sparse/laplacian.cu`) has always built into `SPARSE_TEST`
+  per `cpp/tests/CMakeLists.txt`. Both regression checks now correctly
+  filtered to their specific test name.
+- **Release tag naming**: tags now carry a `-g<short-commit>` suffix
+  (this release: `v26.10-gb10-cu133-g37ba10e2`). `VERSION` only bumps on
+  a real upstream release cut, so multiple genuinely different rebuilds
+  can otherwise collide on the same tag — confirmed directly: had to
+  delete-and-recreate the previous `v26.10-gb10-cu133` tag to publish
+  this same day's *first* rebuild over the identical Aug 7 release.
+- **`tuned/full_test.sh` writes evidence, `tuned/release.sh` requires it**
+  — the full C++ gtest suite now writes a timestamped results log
+  (`tuned/releases/TEST_RESULTS_gb10.log`) instead of just printing to
+  stdout; `release.sh` refuses to publish unless that file exists, is
+  newer than the built `.so`, and shows a clean pass. Attached below as a
+  release asset.
 
-Real functional changes:
-- **Native row-major PCA** ([#3036](https://github.com/rapidsai/raft/pull/3036))
-  — PCA now supports row-major layout natively.
-- **Predictable `raft::resources`** ([#3052](https://github.com/rapidsai/raft/pull/3052))
-  — resource-management rework (same PR already backported into the
-  aarch64/26.6 line's earlier work).
-- **Fix missing nvtx stack and host mem resource by exporting the symbols**
-  ([#3083](https://github.com/rapidsai/raft/pull/3083)) — real
-  export/symbol-visibility bug fix.
-- **Remove orphaned `raft::runtime::matrix::select_k` declaration**
-  ([#3084](https://github.com/rapidsai/raft/pull/3084)) — dead API
-  removal.
-- **Make cuBLASLt descriptor wrappers move-safe**
-  ([#3078](https://github.com/rapidsai/raft/pull/3078)).
-- **Use `cuda::std::numeric_limits` in LAP kernels instead of passing
-  infinity** ([#3094](https://github.com/rapidsai/raft/pull/3094)) and
-  **use `cuda::std::bit_cast` in stats minmax instead of a hand-rolled
-  helper** ([#3095](https://github.com/rapidsai/raft/pull/3095)) —
-  internal cleanups, standard-library adoption.
-- **Mitigate cuBLASLt 13.6 GEMM bug for inputs greater than 2^31**
-  ([#3098](https://github.com/rapidsai/raft/pull/3098)) and **cublas team
-  verified workaround for large GEMM `algo68` bug**
-  ([#3100](https://github.com/rapidsai/raft/pull/3100)) — two real
-  CUDA-13.6-specific GEMM correctness fixes.
-- **wheels: build CUDA 13 wheels with latest CTK (13.3.0)**
-  ([#3076](https://github.com/rapidsai/raft/pull/3076)) — build-only,
-  matches the CUDA 13.3 toolkit this gb10 build already uses.
+## Full Test Suite Result
 
-Housekeeping only (pre-commit/SPDX/docs-theme cleanup, the version-bump
-commit itself) is omitted above.
+**16/16 gtest binaries passed, 0 failures** — `CORE_TEST`,
+`CORE_TEST_NOCUDA`, `EXT_HEADERS_TEST_COMPILED_EXPLICIT`,
+`EXT_HEADERS_TEST_COMPILED_IMPLICIT`, `EXT_HEADERS_TEST_IMPLICIT`,
+`GEMM_LARGE_TEST`, `LABEL_TEST`, `LINALG_TEST`,
+`MATRIX_SELECT_LARGE_TEST`, `MATRIX_SELECT_TEST`, `MATRIX_TEST`,
+`RANDOM_TEST`, `SOLVERS_TEST`, `SPARSE_TEST`, `STATS_TEST`, `UTILS_TEST`.
+Full output attached as `TEST_RESULTS_gb10.log` on this release.
 
-## What's New in the Publish Pipeline (carried over from 26.8)
+## Reproducing This Build
 
-- Variant-qualified library naming: `libraft-gb10-cu133.so` (via a new
-  `RAFT_OUTPUT_NAME` CMake override), matching `zbrad/cuvs`'s own
-  `libcuvs-<variant>-<cuda_tag>.so` convention.
-- Release tag convention unified with cuvs:
-  `v<short_ver>-<variant>-<cuda_tag>` (this release: `v26.10-gb10-cu133`).
-- Build-info stamping on the tarball's own `.so`, not just the wheel's.
-- `zbrad/cuvs`'s `tuned/build.sh` now consumes this release directly (via
-  `resolve_raft_release()`) instead of CPM-building upstream
-  `rapidsai/raft` from source — this release is what that mechanism
-  pulls.
+```
+git clone git@github.com:zbrad/raft.git && cd raft
+git checkout 37ba10e2
+GPU_TUNED_VARIANT=gb10 bash tuned/build.sh gb10   # pins rapids-cmake internally, see tuned/build.sh
+bash tuned/full_test.sh gb10                       # must pass before packaging
+bash tuned/package.sh gb10
+```
+
+The exact `rapids-cmake` source this build (and `bash tuned/build.sh`
+above) resolves against:
+```
+https://github.com/rapidsai/rapids-cmake/archive/8fc2d05e4b29a2fb7a355192ce19190fcf24c37f.zip
+```
+See `tuned/docs/RELEASE_PINS.md` for the full table mapping every
+published release to its commit + rapids-cmake pin.
 
 ## Build Environment
 
@@ -72,13 +88,14 @@ commit itself) is omitted above.
 |-----------|---------|
 | **CUDA Toolkit** | 13.3 |
 | **RMM** | 26.10.00 (CPM-fetched at raft's own C++ configure time) |
+| **rapids_logger** | 0.3.0 (via the pinned rapids-cmake commit above) |
 
 ### Compiler & Tools
 | Component | Version |
 |-----------|---------|
 | **GCC** | 14.2.0 |
 | **CMake** | 4.3.1 |
-| **Python** | 3.14.6 |
+| **CCCL** | 3.5.0 |
 
 ## Supported Hardware
 
@@ -108,8 +125,8 @@ commit itself) is omitted above.
 
 ### Extract the Package
 ```bash
-tar -xjf raft-26.10-gb10-cu133.tar.bz2
-cd raft-26.10-gb10-cu133
+tar -xjf raft-26.10-gb10-cu133-g37ba10e2.tar.bz2
+cd raft-26.10-gb10-cu133-g37ba10e2
 ```
 
 ### Set Up Environment
@@ -132,7 +149,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 ```bash
 mkdir build && cd build
 cmake \
-  -DCMAKE_PREFIX_PATH=/path/to/raft-26.10-gb10-cu133 \
+  -DCMAKE_PREFIX_PATH=/path/to/raft-26.10-gb10-cu133-g37ba10e2 \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
   -DCMAKE_CUDA_ARCHITECTURES=121a \
@@ -140,22 +157,16 @@ cmake \
 make -j$(nproc)
 ```
 
-### Install via wheels instead
-The `libraft-cu13`/`pylibraft-spark-cu13` wheels for GB10 are published
-separately — see
-[`v26.08.00-aarch64-cuda133-gb10`](https://github.com/zbrad/raft/releases/tag/v26.08.00-aarch64-cuda133-gb10)
-(not yet rebuilt against 26.10.00).
-
 ## Compatibility
 
 ### API Stability
-- **C++ API**: Mostly stable — see "What Changed Upstream" above;
-  `raft::runtime::matrix::select_k`'s orphaned declaration was removed
-  (#3084), so downstream code referencing it will need updating.
-- **CMake Targets**: Stable — `find_package(raft)` + `raft::raft`,
-  unaffected by any of the above.
-- **Binary Compatibility**: New build; recompile downstream projects
-  against this artifact.
+- **C++ API**: Stable — only the laplacian NZType internal fix (no
+  signature change) since the last release.
+- **CMake Targets**: Stable — `find_package(raft)` + `raft::raft`.
+- **ABI**: `rapids_logger` moved 0.2.3 → 0.3.0 (transitive, via the
+  rapids-cmake pin) — recompile downstream projects against this
+  artifact rather than mixing with binaries built against the prior
+  release.
 
 ### Verify Integrity
 ```bash
@@ -165,6 +176,6 @@ sha256sum -c CHECKSUMS_gb10
 ---
 
 **RAFT Version**: 26.10
-**Release Date**: 2026-08-07
-**Package**: raft-26.10-gb10-cu133.tar.bz2
+**Release Date**: 2026-09-08
+**Package**: raft-26.10-gb10-cu133-g37ba10e2.tar.bz2
 **Platform**: aarch64 / SM_121a / CUDA 13.3
