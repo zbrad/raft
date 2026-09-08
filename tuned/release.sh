@@ -25,8 +25,15 @@ SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
 # Must match tuned/package.sh's own PKG_NAME computation exactly
 # (independent, not passed between the two scripts -- same pattern as
 # RELEASE_NOTES_FILE below).
-PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
-RELEASE_TAG="v${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
+#
+# -g<short-sha> suffix: see tuned/package.sh's comment on this same
+# computation -- SHORT_VER alone collides across genuinely different
+# rebuilds (raft's VERSION only bumps on a real upstream release cut),
+# which is exactly what forced deleting and recreating v26.10-gb10-cu133
+# to republish 2026-09-08's build over the identical Aug 7 tag.
+SHORT_SHA="$(git rev-parse --short HEAD)"
+PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}-g${SHORT_SHA}"
+RELEASE_TAG="v${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}-g${SHORT_SHA}"
 # Canonical release-notes filename (WITH the _cu<N> suffix, since the CUDA
 # minor version varies release to release and shouldn't be left implicit)
 # -- wheel.sh derives this identically, independently (they're

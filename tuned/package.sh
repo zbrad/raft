@@ -29,7 +29,19 @@ SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
 # ${CUDA_TAG} there) -- this used to be <short_ver>-cuda<compact>-<variant>
 # (cuda tag before variant), which didn't match cuvs's order despite both
 # repos otherwise following the same scheme.
-PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
+#
+# -g<short-sha> suffix: raft's own VERSION only bumps when upstream cuts
+# a real release, so multiple genuinely different tuned-builds rebuilds
+# (different commits, different content) can share the same SHORT_VER --
+# confirmed 2026-09-08, had to delete-and-recreate v26.10-gb10-cu133 to
+# republish today's build over the identical Aug 7 tag. The commit
+# suffix makes every build's tag unique without inventing a synthetic
+# sub-version number; `git log --oneline` off the short hash always
+# tells you exactly what's in a given release. Must match release.sh's
+# own identical computation -- independent, not passed between them,
+# same pattern as SHORT_VER/RELEASE_NOTES_FILE above.
+SHORT_SHA="$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD)"
+PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}-g${SHORT_SHA}"
 PKG_DIR="/tmp/${PKG_NAME}"
 OUT="${PROJECT_ROOT}/${PKG_NAME}.tar.bz2"
 
