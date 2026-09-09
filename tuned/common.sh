@@ -148,6 +148,55 @@ gpu_tuned_verify_cuda_compat() {
     echo "OK: ${so_file} CUDA runtime compat confirmed (${needed}, matches expected major ${expected_major})"
 }
 
+# gpu_tuned_verify_cccl_version <cccl-src-dir> <min-version> — confirms the
+# CCCL version CPM fetched into <cccl-src-dir> (read from its
+# cccl-version.json, e.g. {"major":3,"minor":5,"patch":0}) is >=
+# <min-version> ("major.minor.patch"). Warns (does not fail) rather than
+# erroring if cccl-version.json isn't found, since not every CCCL-consuming
+# repo necessarily vendors it via CPM the same way -- this is a targeted
+# regression guard, not a hard CCCL dependency check.
+#
+# Why this exists: raft hit a real memory-corruption bug on Blackwell/
+# SM_12x (thrust::exclusive_scan silently writing OOB when its input and
+# output iterators have mismatched types) that turned out to already be
+# fixed upstream in CCCL -- backported to branch/3.4.x and first released
+# in CCCL v3.4.0. A raft-side fix was opened (NVIDIA/raft#3141) then
+# closed once that was verified empirically (reverted the fix, reran
+# clean under compute-sanitizer + the full regression suite against
+# current CCCL). Without this check, silently pinning an older CCCL
+# (e.g. rolling back a rapids-cmake pin) would reintroduce that exact bug
+# with no build-time signal.
+gpu_tuned_verify_cccl_version() {
+    local cccl_src_dir="$1" min_version="$2"
+    local version_file="${cccl_src_dir}/cccl-version.json"
+    if [[ ! -f "${version_file}" ]]; then
+        echo "WARNING: gpu_tuned_verify_cccl_version: no cccl-version.json found at ${version_file} -- skipping CCCL version check." >&2
+        return 0
+    fi
+    local found_major found_minor found_patch
+    found_major="$(grep -oE '"major"[[:space:]]*:[[:space:]]*[0-9]+' "${version_file}" | grep -oE '[0-9]+$')"
+    found_minor="$(grep -oE '"minor"[[:space:]]*:[[:space:]]*[0-9]+' "${version_file}" | grep -oE '[0-9]+$')"
+    found_patch="$(grep -oE '"patch"[[:space:]]*:[[:space:]]*[0-9]+' "${version_file}" | grep -oE '[0-9]+$')"
+    if [[ -z "${found_major}" || -z "${found_minor}" || -z "${found_patch}" ]]; then
+        echo "WARNING: gpu_tuned_verify_cccl_version: could not parse major/minor/patch from ${version_file} -- skipping CCCL version check." >&2
+        return 0
+    fi
+    local min_major min_minor min_patch
+    IFS='.' read -r min_major min_minor min_patch <<< "${min_version}"
+    local found_tuple min_tuple
+    found_tuple="$(printf '%05d%05d%05d' "${found_major}" "${found_minor}" "${found_patch}")"
+    min_tuple="$(printf '%05d%05d%05d' "${min_major:-0}" "${min_minor:-0}" "${min_patch:-0}")"
+    if [[ "${found_tuple}" < "${min_tuple}" ]]; then
+        echo "ERROR: CCCL ${found_major}.${found_minor}.${found_patch} (from ${version_file}) is older than the required minimum ${min_version}." >&2
+        echo "       CCCL < 3.4.0 lacks the warpspeed-scan fixes (NVIDIA/cccl#9207, #9781) needed to avoid a real" >&2
+        echo "       memory-corruption bug on Blackwell/SM_12x (thrust::exclusive_scan with mismatched" >&2
+        echo "       input/output types) -- see NVIDIA/raft#3141 (closed, not needed) for the empirical verification" >&2
+        echo "       this minimum is based on." >&2
+        return 1
+    fi
+    echo "OK: CCCL ${found_major}.${found_minor}.${found_patch} meets the minimum required version (${min_version})"
+}
+
 # gpu_tuned_embed_build_info <so-or-bin-path> <variant> <package> <version>
 # [hw-label] [repo-url] [section-name] — embeds a greppable build-info
 # string into a custom ELF section on the given file, readable later via

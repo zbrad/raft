@@ -42,6 +42,15 @@ LIBRAFT_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}" bash build.sh
 
 gpu_tuned_verify_arch "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 
+# CCCL 3.4.0 is the minimum that includes the warpspeed-scan fixes needed
+# to avoid a real memory-corruption bug on Blackwell/SM_12x -- see
+# gpu_tuned_verify_cccl_version's own comment in tuned/common.sh for the
+# full story (this repo's own NVIDIA/raft#3141, closed once verified
+# unnecessary against current CCCL). A hard gate, not informational: an
+# old CCCL here means a real, previously-hit corruption bug, not just a
+# version mismatch.
+gpu_tuned_verify_cccl_version "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/_deps/cccl-src" "3.4.0" || exit 1
+
 # Embed a build-info string into a custom ELF section on the variant-
 # qualified copy (readable later via `readelf -p .raft_build_info <lib>`
 # or plain `strings`), so which CUDA 13.x *minor* toolkit (and which repo
