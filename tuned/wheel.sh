@@ -24,7 +24,7 @@ source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 INSTALL_DIR="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/install"
 VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
 # Derive short version (e.g. 26.06.00 -> 26.6)
-SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
 RELEASE_TAG="v${VERSION}-${GPU_TUNED_PLATFORM}-cuda${CUDA_VERSION_COMPACT}-${GPU_TUNED_VARIANT}"
 RELEASE_TITLE="RAFT ${SHORT_VER} — ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${GPU_TUNED_HW_LABEL}) wheels"
 # Canonical release-notes filename (WITH the _cu<N> suffix, since the CUDA
@@ -45,7 +45,7 @@ WHEEL_SRC="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/wheel-src"
 # ABI-correct for every GPU architecture).
 RMM_SRC="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/_deps/rmm-src"
 RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
-RMM_SHORT_VER="$(echo "${RMM_VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 
 # ── install build deps ─────────────────────────────────────────────────────────
 echo "Installing build dependencies..."

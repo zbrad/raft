@@ -61,7 +61,7 @@ command -v nvcc &>/dev/null || { echo "ERROR: nvcc not found on PATH or under /u
 CUDA_VERSION="$(nvcc --version | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
 CUDA_VERSION_COMPACT="${CUDA_VERSION//./}"
 RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
-RMM_SHORT_VER="$(echo "${RMM_VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 
 DIST_DIR="${PROJECT_ROOT}/dist/shared"
 WHEEL_SRC_RMM="${SOURCE_BUILD_DIR}/wheel-src-rmm-shared"

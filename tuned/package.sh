@@ -23,7 +23,7 @@ VERSION="$(tr -d '\r' < "${PROJECT_ROOT}/VERSION")"
 # Derive short version (e.g. 26.08.00 -> 26.8) -- raft's own long-standing
 # convention (older tags, RELEASE_NOTES_26.8_*.md), kept deliberately even
 # though cuvs's own PKG_NAME/tag uses its full VERSION unshortened.
-SHORT_VER="$(echo "${VERSION}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
 # <short_ver>-<variant>-<cuda_tag>: variant-then-cuda_tag order now matches
 # zbrad/cuvs's release-tag order (v${CUVS_VERSION}-${GPU_TUNED_VARIANT}-
 # ${CUDA_TAG} there) -- this used to be <short_ver>-cuda<compact>-<variant>

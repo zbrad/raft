@@ -285,3 +285,44 @@ EOF
 
     echo "OK: pinned torch==${torch_version} for ${venv_dir} (constraint: ${constraints_file})"
 }
+
+# gpu_tuned_short_ver <version-string> — reduces a "x.y.z..." version (any
+# number of trailing dot-separated components -- patch, build metadata,
+# etc.) to "x.y", stripping leading zeros from x/y (e.g. "26.10.00" ->
+# "26.10", "01.02.3" -> "1.2"). Errors rather than silently echoing the
+# unmodified input if <version-string> doesn't have at least an "x.y."
+# prefix to reduce. Consolidates a regex independently duplicated 5 times
+# across raft's and faiss's own package.sh/release.sh/wheel.sh.
+gpu_tuned_short_ver() {
+    local version="$1" short
+    short="$(printf '%s' "${version}" | sed -E 's/^0*([0-9]+)\.0*([0-9]+)\..*/\1.\2/')"
+    if [[ ! "${short}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_short_ver: could not reduce '${version}' to an 'x.y' short version (expected at least 'x.y.<something>')." >&2
+        return 1
+    fi
+    echo "${short}"
+}
+
+# gpu_tuned_wheel_version <wheel-path> <pkg-name-prefix> — extracts the
+# full version string from a built wheel's filename: the segment between
+# "<pkg-name-prefix>-" and the next "-", e.g.
+# "flash_attn-2.7.2.post1+cu133-cp312-cp312-linux_aarch64.whl" with prefix
+# "flash_attn" -> "2.7.2.post1+cu133". <pkg-name-prefix> is inlined into a
+# sed pattern as-is (no regex-escaping) -- fine for the plain
+# alnum/underscore package names used across this fleet, not a general-
+# purpose escape-anything helper. Callers strip any "+local" segment
+# themselves (${VERSION%%+*} -- trivial bash, not worth a function) when
+# they need a release-tag-safe base version instead of the full one.
+# Consolidates a regex independently duplicated 3 times across
+# flash-attention's, flash-attention-vllm's, and vllm's own wheel.sh/
+# release.sh.
+gpu_tuned_wheel_version() {
+    local wheel_path="$1" pkg_prefix="$2" wheel_basename version
+    wheel_basename="$(basename "${wheel_path}")"
+    version="$(printf '%s' "${wheel_basename}" | sed -E "s/^${pkg_prefix}-([^-]+)-.*/\\1/")"
+    if [[ "${version}" == "${wheel_basename}" ]]; then
+        echo "ERROR: gpu_tuned_wheel_version: could not extract a version from '${wheel_basename}' (expected it to start with '${pkg_prefix}-')." >&2
+        return 1
+    fi
+    echo "${version}"
+}
