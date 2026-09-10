@@ -326,3 +326,42 @@ gpu_tuned_wheel_version() {
     fi
     echo "${version}"
 }
+
+# gpu_tuned_publish_release <owner/repo> <tag> <title> <notes-or-@notes-file>
+# [asset-spec ...] — publish a GitHub release via `gh release create`,
+# always targeting the "tuned-builds" branch (every consumer in this fleet
+# always does; call `gh release create` directly for the rare exception).
+# <notes-or-@notes-file>: pass literal notes text, or "@<path>"
+# (curl-style) to use --notes-file <path> instead -- covers raft's own
+# release.sh/wheel.sh/raft_wheel_librmm_shared.sh, which choose between a
+# generated notes file and an inline fallback string. Each <asset-spec> is
+# passed through as-is to `gh release create` (its own "<path>#<label>"
+# attachment syntax) -- pass as many as needed, including via an expanded
+# array (`"${ASSETS[@]}"`). Requires at least one asset: a release with
+# nothing attached is always a caller mistake in this fleet (forgot to
+# build/package first), not a legitimate case.
+#
+# Consolidates a call independently hand-written 12 times across 10 repos
+# (raft alone 3x) -- see
+# ~/.claude/design/tuned-common-consolidation-candidates.md finding #1.
+gpu_tuned_publish_release() {
+    local repo="$1" tag="$2" title="$3" notes="$4"
+    shift 4
+    if [[ $# -eq 0 ]]; then
+        echo "ERROR: gpu_tuned_publish_release: no assets given (at least one is required)." >&2
+        return 1
+    fi
+    local notes_args=(--notes "${notes}")
+    if [[ "${notes}" == @* ]]; then
+        notes_args=(--notes-file "${notes#@}")
+    fi
+    if ! gh release create "${tag}" \
+        --repo "${repo}" \
+        --title "${title}" \
+        --target "tuned-builds" \
+        "${notes_args[@]}" \
+        "$@"; then
+        return 1
+    fi
+    echo "OK: published ${repo}@${tag} -- https://github.com/${repo}/releases/tag/${tag}"
+}

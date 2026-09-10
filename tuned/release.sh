@@ -66,10 +66,9 @@ if ! grep -q "All binaries passed\." "${TEST_RESULTS_FILE}"; then
 fi
 echo "Test gate: ${TEST_RESULTS_FILE} shows a clean pass, newer than the built library. Proceeding."
 
-gh release create "${RELEASE_TAG}" --repo zbrad/raft \
+gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" \
+  "RAFT ${SHORT_VER} — ${GPU_TUNED_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH}" \
+  "@${RELEASE_NOTES_FILE}" \
   "${PKG_NAME}.tar.bz2#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${GPU_TUNED_DEVICE_LABEL})" \
   "tuned/releases/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
-  "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})" \
-  --title "RAFT ${SHORT_VER} — ${GPU_TUNED_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH}" \
-  --notes-file "${RELEASE_NOTES_FILE}" \
-  --target "tuned-builds"
+  "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})"
