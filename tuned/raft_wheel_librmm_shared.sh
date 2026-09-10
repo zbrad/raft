@@ -150,19 +150,14 @@ echo "rmm wheel: $(basename "${RMM_WHEEL}") ($(du -sh "${RMM_WHEEL}" | awk '{pri
 # ── Publish ────────────────────────────────────────────────────────────────
 cd "${PROJECT_ROOT}"
 
-RELEASE_NOTES_ARG=()
 if [[ -f "${RELEASE_NOTES}" ]]; then
-    RELEASE_NOTES_ARG=(--notes-file "${RELEASE_NOTES}")
+    NOTES="@${RELEASE_NOTES}"
 else
-    RELEASE_NOTES_ARG=(--notes "librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40/rtx50); consumed by each variant's own libraft/pylibraft/raft-dask release.")
+    NOTES="librmm-cu${CUDA_VERSION_COMPACT:0:2} + rmm-cu${CUDA_VERSION_COMPACT:0:2} ${RMM_VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION}. No device code -- shared across every GPU-architecture variant (gb10/rtx40/rtx50); consumed by each variant's own libraft/pylibraft/raft-dask release."
 fi
 
 echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
-gh release create "${RELEASE_TAG}" \
-    --repo zbrad/raft \
-    --title "${RELEASE_TITLE}" \
-    --target "tuned-builds" \
-    "${RELEASE_NOTES_ARG[@]}" \
+gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" "${RELEASE_TITLE}" "${NOTES}" \
     "${LIBRMM_WHEEL}#$(basename "${LIBRMM_WHEEL}")" \
     "${RMM_WHEEL}#$(basename "${RMM_WHEEL}")"
 

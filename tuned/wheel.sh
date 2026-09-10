@@ -335,19 +335,14 @@ echo "raft-dask wheel: $(basename "${RAFT_DASK_WHEEL}") ($(du -sh "${RAFT_DASK_W
 # one release remains a complete, one-stop install for this GPU variant.
 cd "${PROJECT_ROOT}"
 
-RELEASE_NOTES_ARG=()
 if [[ -f "${RELEASE_NOTES}" ]]; then
-    RELEASE_NOTES_ARG=(--notes-file "${RELEASE_NOTES}")
+    NOTES="@${RELEASE_NOTES}"
 else
-    RELEASE_NOTES_ARG=(--notes "pylibraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + libraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + raft-dask-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} ${VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${GPU_TUNED_HW_LABEL}), bundled with the shared librmm-cu13/rmm-cu13 $(basename "${LIBRMM_WHEEL}") build (no device code -- shared across GPU variants, see raft_wheel_librmm_shared.sh)")
+    NOTES="pylibraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + libraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + raft-dask-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} ${VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${GPU_TUNED_HW_LABEL}), bundled with the shared librmm-cu13/rmm-cu13 $(basename "${LIBRMM_WHEEL}") build (no device code -- shared across GPU variants, see raft_wheel_librmm_shared.sh)"
 fi
 
 echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
-gh release create "${RELEASE_TAG}" \
-    --repo zbrad/raft \
-    --title "${RELEASE_TITLE}" \
-    --target "tuned-builds" \
-    "${RELEASE_NOTES_ARG[@]}" \
+gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" "${RELEASE_TITLE}" "${NOTES}" \
     "${LIBRMM_WHEEL}#$(basename "${LIBRMM_WHEEL}")" \
     "${RMM_WHEEL}#$(basename "${RMM_WHEEL}")" \
     "${LIBRAFT_WHEEL}#$(basename "${LIBRAFT_WHEEL}")" \
