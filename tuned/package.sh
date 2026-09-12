@@ -57,6 +57,13 @@ cp -r "${INSTALL_DIR}" "${PKG_DIR}"
 if [[ -f "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" ]]; then
     gpu_tuned_verify_arch "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
     embed_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_VARIANT}" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "${GPU_TUNED_HW_LABEL}"
+    # Confirm the stamp actually landed before archiving -- the tarball is
+    # a straight `tar -cjf` of PKG_DIR below with no further build/install
+    # pass, so this should always pass, but every other repo in this
+    # fleet validates its stamp right after writing it rather than
+    # assuming (embed_build_info's wrapper here pins the section name to
+    # "raft_build_info" regardless of package -- see its definition).
+    gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
 fi
 
 cd /tmp
