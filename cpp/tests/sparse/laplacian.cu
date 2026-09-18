@@ -481,7 +481,7 @@ TEST(Raft, ComputeGraphLaplacianCOOLongNZType)
                                               lap_struct.get_rows().data(),
                                               lap_struct.get_cols().data(),
                                               laplacian.get_elements().data(),
-                                              raft::resource::get_cuda_stream(res));
+                                              raft::resource::get_cuda_stream(res).get());
   raft::resource::sync_stream(res);
 
   auto out_rows   = std::vector<int>(lap_struct.get_nnz());
