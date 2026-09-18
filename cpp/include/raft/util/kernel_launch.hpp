@@ -140,7 +140,7 @@ struct launch_on {
     std::size_t smem                                 = 0,
     std::initializer_list<cudaLaunchAttribute> attrs = {},
     std::source_location loc                         = std::source_location::current())
-    : launch_on{resource::get_cuda_stream(res).value(),
+    : launch_on{resource::get_cuda_stream(res).get(),
                 smem,
                 resource::get_dry_run_flag(res) ? detail::kSkipExecution : detail::launch_flags{},
                 attrs,
@@ -162,12 +162,12 @@ struct launch_on {
    * @param[in] loc call site to blame for launch errors; leave at its default
    */
   launch_on(  // NOLINT(google-explicit-constructor)
-    rmm::cuda_stream_view stream,
+    cuda::stream_ref stream,
     std::size_t smem                                 = 0,
     bool kSkipExecution                              = false,
     std::initializer_list<cudaLaunchAttribute> attrs = {},
     std::source_location loc                         = std::source_location::current())
-    : launch_on{stream.value(), smem, kSkipExecution, attrs, loc}
+    : launch_on{stream.get(), smem, kSkipExecution, attrs, loc}
   {
   }
 
