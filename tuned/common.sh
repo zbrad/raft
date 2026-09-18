@@ -3,9 +3,11 @@
 # "tuned-builds" fleet (pytorch, llama.cpp, flash-attention, flashinfer,
 # raft, cuvs, faiss, and downstream consumers like vllm/ComfyUI/open-webui).
 #
-# Source this file; it defines functions only (no side effects, no exports)
-# so it's safe to source before or after a repo's own tuned/env.sh sets its
-# device-specific vars. Every function takes its inputs as explicit
+# Source this file; it defines functions only (no exports) so it's safe to
+# source before or after a repo's own tuned/env.sh sets its device-specific
+# vars. The ONE intentional side effect is the loud-failure ERR trap
+# installed at the bottom of this file (see "Loud failures" there; opt out
+# with GPU_TUNED_NO_ERR_TRAP=1). Every function takes its inputs as explicit
 # arguments -- none of them read a repo-specific global var name (that's
 # the whole point: this file is meant to be byte-identical across every
 # consumer, so it's fetched/vendored, not hand-copied-and-edited).
@@ -220,7 +222,7 @@ gpu_tuned_verify_cccl_version() {
 # carry it. It didn't always: some tuned-builds version schemes embed a
 # git sha in the version string itself (e.g. pytorch's old
 # BASE.dev<date>+git<sha>...), others (e.g. a plain semver, or a
-# tuning-vN commit-count scheme) don't -- a caller passing one of the
+# tuning.<N> commit-count scheme) don't -- a caller passing one of the
 # latter used to leave the stamped binary itself with no way back to the
 # exact commit, unlike its GitHub release title. Auto-detecting here
 # means it can't be forgotten by a caller either way.
@@ -535,3 +537,74 @@ gpu_tuned_audit_stray() {
     done
     return 0
 }
+
+# gpu_tuned_local_version <variant> <cuda-compact> <tuning-count> -- prints
+# the canonical PEP 440 local-version label for a tuned wheel:
+#   <variant>.cu<cuda-compact>.tuning.<count>     e.g. gb10.cu134.tuning.34
+# This is the ONE place that format is defined; every wheel script calls it
+# rather than hand-building the string. Rules enforced (see
+# docs/VERSIONING.md for the reasoning and sources):
+#   - dot-separated, lowercase alphanumerics only. PEP 440 normalizes "-"
+#     and "_" to "." and lowercases, so any other form makes the wheel
+#     filename differ from the string we built (tags/titles then disagree).
+#   - the counter is its own PURELY NUMERIC segment ("tuning.34", not
+#     "tuning.v34" / "tuned34"): numeric segments compare as integers, a
+#     fused letter+digit segment compares as text (v100 sorts below v9).
+#   - the counter is canonical decimal (no leading zeros): PEP 440
+#     normalizes numeric segments, so "007" becomes "7" and a filename
+#     containing "007" no longer matches its own metadata (real-world
+#     failure: NVIDIA's Jetson torch wheels with "nv24.08", rejected by uv).
+# Errors (return 1, message on stderr) rather than emitting a bad label.
+gpu_tuned_local_version() {
+    local variant="${1:-}" cuda="${2:-}" count="${3:-}"
+    if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ ]]; then
+        echo "ERROR: gpu_tuned_local_version: variant '${variant}' must be lowercase alphanumeric (e.g. gb10)." >&2
+        return 1
+    fi
+    if [[ ! "${cuda}" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_local_version: cuda-compact '${cuda}' must be digits only (e.g. 134 for CUDA 13.4)." >&2
+        return 1
+    fi
+    if [[ ! "${count}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+        echo "ERROR: gpu_tuned_local_version: tuning count '${count}' must be a canonical decimal integer (no leading zeros, no letters): PEP 440 normalizes numeric segments, so a padded count would not match its own wheel filename. See docs/VERSIONING.md." >&2
+        return 1
+    fi
+    echo "${variant}.cu${cuda}.tuning.${count}"
+}
+
+# gpu_tuned_tuning_label <version-string> -- prints the "tuning.<N>" part of
+# a tuned version (e.g. "0.7.0+gb10.cu134.tuning.149" -> "tuning.149"), or
+# nothing (still exit 0) if the version doesn't carry one -- e.g. a wheel
+# built before the marker existed, or the legacy "tuning.v<N>" form
+# (see docs/VERSIONING.md, "Backfill"). Never fails: callers run under
+# `set -o pipefail`, where a no-match grep would otherwise abort them.
+gpu_tuned_tuning_label() {
+    printf '%s' "${1:-}" | grep -oE 'tuning\.[0-9]+' | head -1 || true
+}
+
+# --- Loud failures ---------------------------------------------------------
+# Every consumer script runs under `set -euo pipefail`, where a failing
+# command -- notably a no-match grep inside a $(...) assignment -- aborts the
+# script with NO output at all. That has bitten this fleet repeatedly
+# (release.sh's tuning-label grep, audit_pinned/audit_stray, venv checks).
+# Sourcing this file installs an ERR trap so an abort always says which
+# command failed, where, and from what call stack. Quiet by design when
+# errexit is not active (a `set +e` region, or a command whose failure the
+# caller handles with `||`/`if`, never fires an ERR trap in the first
+# place). Opt out with GPU_TUNED_NO_ERR_TRAP=1; an ERR trap the script
+# already installed itself is left alone.
+gpu_tuned_on_err() {
+    local rc="$1" cmd="$2" i
+    [[ $- == *e* ]] || return 0
+    {
+        echo "[tuned] ERROR: command failed (exit ${rc}): ${cmd}"
+        for (( i = 1; i < ${#BASH_SOURCE[@]}; i++ )); do
+            echo "[tuned]   at ${BASH_SOURCE[i]}:${BASH_LINENO[i-1]} (${FUNCNAME[i]:-main})"
+        done
+    } >&2
+}
+
+if [[ -z "${GPU_TUNED_NO_ERR_TRAP:-}" && -z "$(trap -p ERR)" ]]; then
+    set -o errtrace
+    trap 'gpu_tuned_on_err "$?" "${BASH_COMMAND}"' ERR
+fi
