@@ -582,6 +582,55 @@ gpu_tuned_tuning_label() {
     printf '%s' "${1:-}" | grep -oE 'tuning\.[0-9]+' | head -1 || true
 }
 
+# gpu_tuned_check_main_current [repo-dir] -- fails loudly if the tuning counter
+# (git rev-list --count main..HEAD, see gpu_tuned_tuning_count) would include
+# upstream's commits rather than only ours. That happens when upstream has been
+# merged into HEAD but local `main` was not fast-forwarded to `upstream/main`
+# afterwards: those commits are in main..HEAD but are not ours. (A plain
+# `git fetch upstream` without a merge is fine and does not trip this.)
+# Measured exactly: <stale> = count(main..HEAD) - count(HEAD --not main
+# upstream/main). Returns 1 with the fix command when <stale> > 0, unless
+# GPU_TUNED_ALLOW_STALE_MAIN is set (then a loud warning and return 0). With no
+# `upstream` remote or no fetched upstream/main the check cannot run, so it
+# warns on stderr and returns 0. A missing local `main` is always an error.
+gpu_tuned_check_main_current() {
+    local dir="${1:-.}" total ours stale
+    if ! git -C "${dir}" rev-parse --verify --quiet refs/heads/main >/dev/null; then
+        echo "ERROR: gpu_tuned_check_main_current: no local 'main' branch in ${dir}; the tuning counter is git rev-list --count main..HEAD. Create it with: git fetch upstream main:main" >&2
+        return 1
+    fi
+    if ! git -C "${dir}" remote get-url upstream >/dev/null 2>&1; then
+        echo "WARNING: gpu_tuned_check_main_current: no 'upstream' remote in ${dir}; cannot verify local main is current." >&2
+        return 0
+    fi
+    if ! git -C "${dir}" rev-parse --verify --quiet refs/remotes/upstream/main >/dev/null; then
+        echo "WARNING: gpu_tuned_check_main_current: upstream/main not fetched in ${dir}; run 'git fetch upstream' so local main can be verified." >&2
+        return 0
+    fi
+    total="$(git -C "${dir}" rev-list --count main..HEAD)"
+    ours="$(git -C "${dir}" rev-list --count HEAD --not main upstream/main)"
+    stale=$(( total - ours ))
+    if (( stale > 0 )); then
+        echo "ERROR: gpu_tuned_check_main_current: local 'main' is stale in ${dir}: the tuning counter (main..HEAD = ${total}) would include ${stale} upstream commit(s); only ${ours} are ours." >&2
+        echo "  Fix: git fetch upstream main:main   (fast-forward only), then re-run. See docs/VERSIONING.md." >&2
+        if [[ -n "${GPU_TUNED_ALLOW_STALE_MAIN:-}" ]]; then
+            echo "WARNING: GPU_TUNED_ALLOW_STALE_MAIN is set; continuing with an inflated counter." >&2
+            return 0
+        fi
+        return 1
+    fi
+}
+
+# gpu_tuned_tuning_count [repo-dir] -- prints the tuning counter N for a wheel's
+# tuning.<N> label: git rev-list --count main..HEAD, after
+# gpu_tuned_check_main_current has confirmed it counts only our commits. Use it
+# instead of running git rev-list yourself; it fails loudly on a stale main.
+gpu_tuned_tuning_count() {
+    local dir="${1:-.}"
+    gpu_tuned_check_main_current "${dir}" || return 1
+    git -C "${dir}" rev-list --count main..HEAD
+}
+
 # --- Loud failures ---------------------------------------------------------
 # Every consumer script runs under `set -euo pipefail`, where a failing
 # command -- notably a no-match grep inside a $(...) assignment -- aborts the
