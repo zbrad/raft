@@ -6,6 +6,24 @@
 # memory-corruption fix). Sourced by each variant's
 # raft_full_test_<variant>.sh.
 
+# Tests skipped under WSL2 only (native Linux still runs them), as
+# "<binary>:<gtest pattern>". Raft.InterruptibleOpenMP assumes 10 host threads'
+# GPU kernels overlap in real time in launch order; on WSL2 that does not hold
+# and it fails ~70% of runs with a varying finished-thread count (3..10), also
+# with a 100 ms step instead of 20 ms, so it is not a timing margin. It passes
+# on native Linux (GB10). A proper fix is an upstream rewrite of the test.
+WSL_SKIPPED_TESTS=("CORE_TEST:Raft.InterruptibleOpenMP")
+
+# gtest_args_for <binary-name>: prints the gtest args for that binary.
+gtest_args_for() {
+    local name="$1" entry skip=""
+    grep -qi microsoft /proc/version 2>/dev/null || return 0
+    for entry in "${WSL_SKIPPED_TESTS[@]}"; do
+        [[ "${entry%%:*}" == "${name}" ]] && skip+="${skip:+:}${entry#*:}"
+    done
+    [[ -n "${skip}" ]] && echo "--gtest_filter=-${skip}"
+}
+
 # run_full_test_suite <build_dir>
 # Runs every executable directly under <build_dir>/gtests/ in turn,
 # printing a header before each and a PASS/FAIL summary at the end.
@@ -34,7 +52,10 @@ run_full_test_suite() {
     for bin in "${binaries[@]}"; do
         name="$(basename "${bin}")"
         echo "=== ${name} ==="
-        if ! "${bin}"; then
+        local -a args=()
+        read -r -a args <<< "$(gtest_args_for "${name}")"
+        [[ ${#args[@]} -gt 0 ]] && echo "NOTE: WSL2 -- running with ${args[*]}"
+        if ! "${bin}" "${args[@]}"; then
             failed+=("${name}")
         fi
     done
