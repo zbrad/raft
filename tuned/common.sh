@@ -380,35 +380,56 @@ gpu_tuned_short_ver() {
     echo "${short}"
 }
 
-# gpu_tuned_out_dir <kind> <repo-root> <cuda-tag> [<variant>] — prints the
-# CUDA-version-specific output directory for <kind>, so builds against two
-# CUDA toolkits never share a directory (a shared build dir carries the other
-# toolkit's CMake cache; a shared test log lets one toolkit's results satisfy
-# the other's publish gate):
+# gpu_tuned_cuda_subdir <base-dir> <cuda-tag> [<variant>] — prints
+# <base-dir>/<cuda-tag>[/<variant>], the CUDA-version-specific form of a
+# per-repo output directory, so builds against two CUDA toolkits never share
+# one (a shared build dir carries the other toolkit's CMake cache, a shared
+# staging or dist dir gets overwritten or deleted by the other toolkit's
+# run, and a shared test log lets one toolkit's results satisfy the other's
+# publish gate). <cuda-tag> is the "cu133" form; <variant> is optional.
+# Fails (exit 1, message on stderr) on a malformed tag or variant.
+gpu_tuned_cuda_subdir() {
+    local base="$1" cuda_tag="$2" variant="${3:-}"
+    if [[ -z "${base}" ]]; then
+        echo "ERROR: gpu_tuned_cuda_subdir: base dir is empty." >&2
+        return 1
+    fi
+    if [[ ! "${cuda_tag}" =~ ^cu[0-9]{3,4}$ ]]; then
+        echo "ERROR: gpu_tuned_cuda_subdir: cuda tag '${cuda_tag}' is not of the form cu<digits> (e.g. cu133)." >&2
+        return 1
+    fi
+    if [[ -z "${variant}" ]]; then
+        echo "${base}/${cuda_tag}"
+    elif [[ "${variant}" =~ ^[a-z0-9_-]+$ ]]; then
+        echo "${base}/${cuda_tag}/${variant}"
+    else
+        echo "ERROR: gpu_tuned_cuda_subdir: variant '${variant}' is malformed." >&2
+        return 1
+    fi
+}
+
+# gpu_tuned_out_dir <kind> <repo-root> <cuda-tag> [<variant>] — the
+# CUDA-version-specific output directory for <kind> in the raft/cuvs layout:
 #   build    -> <repo-root>/cpp/build/<cuda-tag>/<variant>
 #   dist     -> <repo-root>/dist/<cuda-tag>/<variant>   (variant may be "shared")
 #   releases -> <repo-root>/tuned/releases/<cuda-tag>   (variant not used)
-# <cuda-tag> is the "cu133" form. Fails (exit 1, message on stderr) on an
-# unknown kind, a malformed tag, or a missing/malformed variant for build/dist.
+# Repos with a different layout (faiss) call gpu_tuned_cuda_subdir directly.
+# Fails on an unknown kind, or a missing variant for build/dist.
 gpu_tuned_out_dir() {
     local kind="$1" root="$2" cuda_tag="$3" variant="${4:-}"
-    if [[ ! "${cuda_tag}" =~ ^cu[0-9]{3,4}$ ]]; then
-        echo "ERROR: gpu_tuned_out_dir: cuda tag '${cuda_tag}' is not of the form cu<digits> (e.g. cu133)." >&2
-        return 1
-    fi
     case "${kind}" in
         build|dist)
-            if [[ ! "${variant}" =~ ^[a-z0-9_-]+$ ]]; then
+            if [[ -z "${variant}" ]]; then
                 echo "ERROR: gpu_tuned_out_dir: '${kind}' needs a variant (got '${variant}')." >&2
                 return 1
             fi
             if [[ "${kind}" == "build" ]]; then
-                echo "${root}/cpp/build/${cuda_tag}/${variant}"
+                gpu_tuned_cuda_subdir "${root}/cpp/build" "${cuda_tag}" "${variant}"
             else
-                echo "${root}/dist/${cuda_tag}/${variant}"
+                gpu_tuned_cuda_subdir "${root}/dist" "${cuda_tag}" "${variant}"
             fi
             ;;
-        releases) echo "${root}/tuned/releases/${cuda_tag}" ;;
+        releases) gpu_tuned_cuda_subdir "${root}/tuned/releases" "${cuda_tag}" ;;
         *)
             echo "ERROR: gpu_tuned_out_dir: unknown kind '${kind}' (expected build, dist or releases)." >&2
             return 1
