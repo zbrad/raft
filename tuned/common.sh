@@ -226,6 +226,13 @@ gpu_tuned_verify_cccl_version() {
 # latter used to leave the stamped binary itself with no way back to the
 # exact commit, unlike its GitHub release title. Auto-detecting here
 # means it can't be forgotten by a caller either way.
+#
+# Optional GPU_TUNED_BUILD_INFO_DEPS (env var, single line): what this
+# artifact bundles or was built against, appended as ", deps <text>" so it
+# is readable from the binary itself (e.g. "kvikio 26.12.00, raft
+# v26.12-gb10-cu134-g9d97792e"). Unset, the stamp is unchanged. An env var
+# rather than an 8th argument so the per-repo embed_build_info wrappers need
+# no change.
 gpu_tuned_embed_build_info() {
     local target="$1" variant="$2" package="$3" version="$4" hw_label="${5:-${2}}" repo_url="${6:-}" section_override="${7:-}"
     local section tmp git_sha
@@ -241,6 +248,7 @@ gpu_tuned_embed_build_info() {
         printf '%s-%s build: %s v%s (%s)' "${package}" "${variant}" "${package}" "${version}" "${hw_label}"
         [ -n "${repo_url}" ] && printf ', %s' "${repo_url}"
         printf ', commit %s' "${git_sha}"
+        [ -n "${GPU_TUNED_BUILD_INFO_DEPS:-}" ] && printf ', deps %s' "${GPU_TUNED_BUILD_INFO_DEPS//$'\n'/ }"
         printf ', built %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "${tmp}"
     objcopy --remove-section "${section}" "${target}" 2>/dev/null || true
@@ -370,6 +378,42 @@ gpu_tuned_short_ver() {
         return 1
     fi
     echo "${short}"
+}
+
+# gpu_tuned_out_dir <kind> <repo-root> <cuda-tag> [<variant>] — prints the
+# CUDA-version-specific output directory for <kind>, so builds against two
+# CUDA toolkits never share a directory (a shared build dir carries the other
+# toolkit's CMake cache; a shared test log lets one toolkit's results satisfy
+# the other's publish gate):
+#   build    -> <repo-root>/cpp/build/<cuda-tag>/<variant>
+#   dist     -> <repo-root>/dist/<cuda-tag>/<variant>   (variant may be "shared")
+#   releases -> <repo-root>/tuned/releases/<cuda-tag>   (variant not used)
+# <cuda-tag> is the "cu133" form. Fails (exit 1, message on stderr) on an
+# unknown kind, a malformed tag, or a missing/malformed variant for build/dist.
+gpu_tuned_out_dir() {
+    local kind="$1" root="$2" cuda_tag="$3" variant="${4:-}"
+    if [[ ! "${cuda_tag}" =~ ^cu[0-9]{3,4}$ ]]; then
+        echo "ERROR: gpu_tuned_out_dir: cuda tag '${cuda_tag}' is not of the form cu<digits> (e.g. cu133)." >&2
+        return 1
+    fi
+    case "${kind}" in
+        build|dist)
+            if [[ ! "${variant}" =~ ^[a-z0-9_-]+$ ]]; then
+                echo "ERROR: gpu_tuned_out_dir: '${kind}' needs a variant (got '${variant}')." >&2
+                return 1
+            fi
+            if [[ "${kind}" == "build" ]]; then
+                echo "${root}/cpp/build/${cuda_tag}/${variant}"
+            else
+                echo "${root}/dist/${cuda_tag}/${variant}"
+            fi
+            ;;
+        releases) echo "${root}/tuned/releases/${cuda_tag}" ;;
+        *)
+            echo "ERROR: gpu_tuned_out_dir: unknown kind '${kind}' (expected build, dist or releases)." >&2
+            return 1
+            ;;
+    esac
 }
 
 # gpu_tuned_wheel_version <wheel-path> <pkg-name-prefix> — extracts the
