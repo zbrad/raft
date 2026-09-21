@@ -47,8 +47,9 @@ RELEASE_NOTES_FILE="tuned/releases/RELEASE_NOTES_${SHORT_VER}_${GPU_TUNED_VARIAN
 # just present -- a stale pass from before the last code change would
 # otherwise silently satisfy this check. See tuned/full_test.sh, which
 # writes this file and is the only thing that should.
-TEST_RESULTS_FILE="tuned/releases/TEST_RESULTS_${GPU_TUNED_VARIANT}.log"
-BUILT_LIB="cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_LIB_NAME:-raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}}.so"
+RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
+TEST_RESULTS_FILE="${RELEASES_DIR}/TEST_RESULTS_${GPU_TUNED_VARIANT}.log"
+BUILT_LIB="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")/lib${RAFT_LIB_NAME:-raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}}.so"
 if [[ ! -f "${TEST_RESULTS_FILE}" ]]; then
   echo "ERROR: ${TEST_RESULTS_FILE} not found -- run tuned/full_test.sh ${GPU_TUNED_VARIANT} first." >&2
   exit 1
@@ -70,5 +71,5 @@ gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" \
   "RAFT ${SHORT_VER} — ${GPU_TUNED_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH}" \
   "@${RELEASE_NOTES_FILE}" \
   "${PKG_NAME}.tar.bz2#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${GPU_TUNED_DEVICE_LABEL})" \
-  "tuned/releases/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
+  "${RELEASES_DIR}/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
   "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})"

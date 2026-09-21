@@ -38,9 +38,10 @@ RAFT_LIB_NAME="raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 # the other, that's exactly the drift this exists to prevent.
 RAPIDS_CMAKE_PIN_SHA="8fc2d05e4b29a2fb7a355192ce19190fcf24c37f"
 
-LIBRAFT_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA}\""
+BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
+LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA}\""
 
-gpu_tuned_verify_arch "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
+gpu_tuned_verify_arch "${BUILD_DIR}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 
 # CCCL 3.4.0 is the minimum that includes the warpspeed-scan fixes needed
 # to avoid a real memory-corruption bug on Blackwell/SM_12x -- see
@@ -49,7 +50,7 @@ gpu_tuned_verify_arch "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_
 # unnecessary against current CCCL). A hard gate, not informational: an
 # old CCCL here means a real, previously-hit corruption bug, not just a
 # version mismatch.
-gpu_tuned_verify_cccl_version "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/_deps/cccl-src" "3.4.0" || exit 1
+gpu_tuned_verify_cccl_version "${BUILD_DIR}/_deps/cccl-src" "3.4.0" || exit 1
 
 # Embed a build-info string into a custom ELF section on the variant-
 # qualified copy (readable later via `readelf -p .raft_build_info <lib>`
@@ -63,5 +64,5 @@ BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 GIT_COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BUILD_INFO_FILE="$(mktemp)"
 echo "raft-${GPU_TUNED_VARIANT} build: https://github.com/zbrad/raft @ ${GIT_COMMIT}, CUDA ${CUDA_VERSION}, sm_${GPU_TUNED_CUDA_ARCH}, built ${BUILD_TIMESTAMP}, rapids-cmake @ ${RAPIDS_CMAKE_PIN_SHA}" > "${BUILD_INFO_FILE}"
-objcopy --add-section .raft_build_info="${BUILD_INFO_FILE}" "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/lib${RAFT_LIB_NAME}.so"
+objcopy --add-section .raft_build_info="${BUILD_INFO_FILE}" "${BUILD_DIR}/lib${RAFT_LIB_NAME}.so"
 rm -f "${BUILD_INFO_FILE}"

@@ -7,7 +7,7 @@
 # behind every gb10/rtx40/rtx50 raft_wheel_<variant>.sh wrapper.
 #
 # Each package is built from a per-variant staging copy under
-# cpp/build-<variant>/wheel-src/ (see raft_wheel_common.sh) instead of
+# cpp/build/<cuda_tag>/<variant>/wheel-src/ (see raft_wheel_common.sh) instead of
 # patching the real python/<pkg>/ sources in place and reverting via a
 # trap. The git-tracked tree is never modified, so there's nothing to
 # revert and no risk of one package's build leaking into another's (the
@@ -21,7 +21,8 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 # shellcheck source=raft_wheel_common.sh
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
-INSTALL_DIR="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/install"
+BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
+INSTALL_DIR="${BUILD_DIR}/install"
 VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
 # Derive short version (e.g. 26.06.00 -> 26.6)
 SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
@@ -34,8 +35,8 @@ RELEASE_TITLE="RAFT ${SHORT_VER} — ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION
 # both compute it via the same one-line expression, not that one produces
 # it for the other).
 RELEASE_NOTES="${PROJECT_ROOT}/tuned/releases/RELEASE_NOTES_${SHORT_VER}_${GPU_TUNED_VARIANT}_cu${CUDA_VERSION_COMPACT}.md"
-DIST_DIR="${PROJECT_ROOT}/dist/${GPU_TUNED_VARIANT}"
-WHEEL_SRC="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/wheel-src"
+DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
+WHEEL_SRC="${BUILD_DIR}/wheel-src"
 # RMM is fetched as a C++ build dependency of raft via rapids-cmake's CPM
 # helper -- read here only to get its exact VERSION, so libraft/pylibraft/
 # raft-dask's dependency pins below can be repointed at the matching
@@ -43,7 +44,7 @@ WHEEL_SRC="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/wheel-src"
 # raft_wheel_librmm_shared.sh, not rebuilt per variant -- see that script
 # for why: librmm/rmm contain no device code, so a single build is
 # ABI-correct for every GPU architecture).
-RMM_SRC="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/_deps/rmm-src"
+RMM_SRC="${BUILD_DIR}/_deps/rmm-src"
 RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
 RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 
@@ -53,7 +54,7 @@ pip install \
     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
     -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt"
 
-SHARED_DIST_DIR="${PROJECT_ROOT}/dist/shared"
+SHARED_DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared)"
 [[ -n "$(ls "${SHARED_DIST_DIR}"/librmm*.whl 2>/dev/null)" && -n "$(ls "${SHARED_DIST_DIR}"/rmm_*.whl 2>/dev/null)" ]] || {
     echo "ERROR: ${SHARED_DIST_DIR} is missing librmm/rmm wheels -- run" \
          "raft_wheel_librmm_shared.sh first (librmm/rmm have no device code" \
@@ -64,7 +65,7 @@ SHARED_DIST_DIR="${PROJECT_ROOT}/dist/shared"
 rm -rf "${DIST_DIR}" "${WHEEL_SRC}"
 mkdir -p "${DIST_DIR}" "${WHEEL_SRC}"
 # Copy the pre-built, shared librmm/rmm wheels into this variant's own
-# dist dir so a single `pip install dist/<variant>/*.whl` and a single
+# dist dir so a single `pip install dist/<cuda_tag>/<variant>/*.whl` and a single
 # GitHub release still provide everything this variant needs -- the
 # BUILD happens once (raft_wheel_librmm_shared.sh), but each variant's
 # release still bundles copies for one-stop installability.
@@ -152,7 +153,7 @@ RAFT_LIB_NAME="raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 echo "Extracting lib${RAFT_LIB_NAME}.so from existing cmake install (no recompile)..."
 mkdir -p "${LIBRAFT_STAGED}/libraft/lib64"
 rm -rf "/tmp/raft-${GPU_TUNED_VARIANT}-install"
-cmake --install "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}" --prefix "/tmp/raft-${GPU_TUNED_VARIANT}-install"
+cmake --install "${BUILD_DIR}" --prefix "/tmp/raft-${GPU_TUNED_VARIANT}-install"
 if [[ ! -f "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" ]]; then
     echo "ERROR: cmake --install did not produce lib${RAFT_LIB_NAME}.so" >&2
     exit 1

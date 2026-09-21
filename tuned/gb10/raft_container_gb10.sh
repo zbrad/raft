@@ -41,6 +41,10 @@ IMAGE_TAG="${IMAGE_TAG:-raft-cuda13.2-pip-spark:26.06}"
 # shellcheck source=../devices/gb10.conf
 source "${PROJECT_ROOT}/tuned/devices/gb10.conf"
 CUDA_ARCH="${GPU_TUNED_CUDA_ARCH}"
+# The image (IMAGE_TAG above) is a CUDA 13.2 toolchain; override to match another.
+CUDA_TAG="${CUDA_TAG:-cu132}"
+# shellcheck source=../common.sh
+source "${PROJECT_ROOT}/tuned/common.sh"
 
 # ── parse flags ────────────────────────────────────────────────────────────────
 DO_BUILD=0
@@ -212,8 +216,8 @@ phase_test() {
     # The gtest phase runs pre-built binaries from the host's build dir inside
     # the container. This validates that SM_121a binaries execute correctly in
     # the containerised environment without needing internet or a full rebuild.
-    HOST_BUILD_DIR="${PROJECT_ROOT}/cpp/build-gb10"
-    CONTAINER_BUILD_DIR="/home/coder/raft/cpp/build-gb10"
+    HOST_BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" gb10)"
+    CONTAINER_BUILD_DIR="$(gpu_tuned_out_dir build /home/coder/raft "${CUDA_TAG}" gb10)"
 
     if [[ ! -f "${HOST_BUILD_DIR}/gtests/UTILS_TEST" ]] || \
        [[ ! -f "${HOST_BUILD_DIR}/gtests/LINALG_TEST" ]]; then
@@ -254,7 +258,7 @@ phase_pytest() {
         return 0
     fi
 
-    DIST_DIR="${DIST_DIR:-${PROJECT_ROOT}/dist/gb10}"
+    DIST_DIR="${DIST_DIR:-$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" gb10)}"
     LIBRAFT_WHL="$(ls "${DIST_DIR}"/libraft_gb10_cu13-*.whl 2>/dev/null | head -1)" || true
     PYLIBRAFT_WHL="$(ls "${DIST_DIR}"/pylibraft_gb10_cu13-*.whl 2>/dev/null | head -1)" || true
 

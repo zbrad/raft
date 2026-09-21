@@ -47,7 +47,9 @@ stop_monitors() {
 trap stop_monitors EXIT
 
 # Locate test binaries
-GTESTS_DIR="${PROJECT_ROOT}/cpp/build-${VARIANT}/gtests"
+# shellcheck source=env.sh
+source "${PROJECT_ROOT}/tuned/env.sh" "${VARIANT}" || exit 1
+GTESTS_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${VARIANT}")/gtests"
 if [[ ! -d "${GTESTS_DIR}" ]]; then
   echo "ERROR: ${GTESTS_DIR} not found — build the tests first" | tee -a "${LOGBASE}-run.log"
   exit 1

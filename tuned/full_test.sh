@@ -1,6 +1,6 @@
 #!/bin/bash
 # full_test.sh <variant> — run every built gtest binary for the
-# given GPU variant (cpp/build-<variant>/gtests/*), not just the 2
+# given GPU variant (cpp/build/<cuda_tag>/<variant>/gtests/*), not just the 2
 # targeted checks in regression_test.sh. Slower and
 # comprehensive; run this before a release, not on every iteration.
 # Shared implementation behind every
@@ -16,9 +16,12 @@ GPU_TUNED_ARG_VARIANT="$1"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=raft_test_common.sh
 source "${PROJECT_ROOT}/tuned/raft_test_common.sh" || exit 1
+# shellcheck source=env.sh
+source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 
-mkdir -p "${PROJECT_ROOT}/tuned/releases"
-RESULTS_FILE="${PROJECT_ROOT}/tuned/releases/TEST_RESULTS_${GPU_TUNED_ARG_VARIANT}.log"
+RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
+mkdir -p "${RELEASES_DIR}"
+RESULTS_FILE="${RELEASES_DIR}/TEST_RESULTS_${GPU_TUNED_ARG_VARIANT}.log"
 
 {
     echo "raft full test suite -- variant=${GPU_TUNED_ARG_VARIANT}"
@@ -32,7 +35,7 @@ RESULTS_FILE="${PROJECT_ROOT}/tuned/releases/TEST_RESULTS_${GPU_TUNED_ARG_VARIAN
 # release.sh's gate depends on this script's own exit code being the real
 # pass/fail signal, not tee's.
 set -o pipefail
-run_full_test_suite "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_ARG_VARIANT}" 2>&1 | tee -a "${RESULTS_FILE}"
+run_full_test_suite "$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_ARG_VARIANT}")" 2>&1 | tee -a "${RESULTS_FILE}"
 STATUS=$?
 
 echo "" >> "${RESULTS_FILE}"

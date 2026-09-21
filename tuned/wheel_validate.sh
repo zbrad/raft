@@ -22,5 +22,7 @@ GPU_TUNED_ARG_VARIANT="$1"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=raft_wheel_common.sh
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
+# shellcheck source=env.sh
+source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 
-validate_wheels "${PROJECT_ROOT}/dist/${GPU_TUNED_ARG_VARIANT}" "3.14" "${GPU_TUNED_ARG_VARIANT}"
+validate_wheels "$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_ARG_VARIANT}")" "3.14" "${GPU_TUNED_ARG_VARIANT}"

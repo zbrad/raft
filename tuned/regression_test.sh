@@ -17,7 +17,9 @@ export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin
 
 GPU_TUNED_ARG_VARIANT="$1"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${PROJECT_ROOT}/cpp/build-${GPU_TUNED_ARG_VARIANT}"
+# shellcheck source=env.sh
+source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
+cd "$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_ARG_VARIANT}")"
 echo "=== UTILS_TEST (warpReduce regression) ==="
 ./gtests/UTILS_TEST --gtest_filter="*WarpReduce*"
 echo "=== SPARSE_TEST (laplacian NZType regression) ==="

@@ -30,6 +30,16 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=raft_wheel_common.sh
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 
+if ! command -v nvcc &>/dev/null; then
+    mapfile -t _CUDA_TOOLKITS < <(for d in /usr/local/cuda-*; do [[ -x "${d}/bin/nvcc" ]] && echo "${d}"; done | sort -V)
+    (( ${#_CUDA_TOOLKITS[@]} > 0 )) && export PATH="${_CUDA_TOOLKITS[-1]}/bin:${PATH}"
+    unset _CUDA_TOOLKITS
+fi
+command -v nvcc &>/dev/null || { echo "ERROR: nvcc not found on PATH or under /usr/local/cuda-*" >&2; exit 1; }
+CUDA_VERSION="$(nvcc --version | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+CUDA_VERSION_COMPACT="${CUDA_VERSION//./}"
+CUDA_TAG="${CUDA_TAG:-cu${CUDA_VERSION_COMPACT}}"
+
 # Any already-built variant's build dir works interchangeably as the
 # source of RMM_SRC -- the CPM-fetched RMM commit is driven by
 # rapids-cmake/the raft commit, not by GPU arch flags, so it does not
@@ -37,7 +47,7 @@ source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 # `SOURCE_ARCH=gb10 bash tuned/raft_wheel_librmm_shared.sh` if rtx50 hasn't
 # been built on this machine.
 SOURCE_ARCH="${SOURCE_ARCH:-rtx50}"
-SOURCE_BUILD_DIR="${PROJECT_ROOT}/cpp/build-${SOURCE_ARCH}"
+SOURCE_BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${SOURCE_ARCH}")"
 [[ -d "${SOURCE_BUILD_DIR}" ]] || {
     echo "ERROR: ${SOURCE_BUILD_DIR} not found -- build ${SOURCE_ARCH} first" \
          "(tuned/${SOURCE_ARCH}/raft_build_${SOURCE_ARCH}.sh) before running this script." >&2
@@ -52,18 +62,10 @@ RMM_SRC="${SOURCE_BUILD_DIR}/_deps/rmm-src"
 # full detection isn't needed, just the static per-variant conf.
 source "${PROJECT_ROOT}/tuned/devices/${SOURCE_ARCH}.conf" || exit 1
 
-if ! command -v nvcc &>/dev/null; then
-    mapfile -t _CUDA_TOOLKITS < <(for d in /usr/local/cuda-*; do [[ -x "${d}/bin/nvcc" ]] && echo "${d}"; done | sort -V)
-    (( ${#_CUDA_TOOLKITS[@]} > 0 )) && export PATH="${_CUDA_TOOLKITS[-1]}/bin:${PATH}"
-    unset _CUDA_TOOLKITS
-fi
-command -v nvcc &>/dev/null || { echo "ERROR: nvcc not found on PATH or under /usr/local/cuda-*" >&2; exit 1; }
-CUDA_VERSION="$(nvcc --version | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
-CUDA_VERSION_COMPACT="${CUDA_VERSION//./}"
 RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
 RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 
-DIST_DIR="${PROJECT_ROOT}/dist/shared"
+DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared)"
 WHEEL_SRC_RMM="${SOURCE_BUILD_DIR}/wheel-src-rmm-shared"
 INSTALL_DIR="${SOURCE_BUILD_DIR}/install"
 RELEASE_TAG="librmm-v${RMM_VERSION}-${GPU_TUNED_PLATFORM}-cuda${CUDA_VERSION_COMPACT}"

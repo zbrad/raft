@@ -1,6 +1,6 @@
 #!/bin/bash
 # raft_test_common.sh — shared helper for running raft's FULL C++ gtest
-# suite (every binary built into a variant's cpp/build-<variant>/gtests/),
+# suite (every binary built into a variant's cpp/build/<cuda_tag>/<variant>/gtests/),
 # as opposed to raft_regression_test_<variant>.sh's 2 targeted checks for
 # known upstream bugs (warpReduce ADL fix, laplacian NZType / SM_121a
 # memory-corruption fix). Sourced by each variant's

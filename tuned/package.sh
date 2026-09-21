@@ -10,7 +10,8 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 # shellcheck source=raft_wheel_common.sh
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
-INSTALL_DIR="${PROJECT_ROOT}/cpp/build-${GPU_TUNED_VARIANT}/install"
+INSTALL_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")/install"
+RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
 # Matches tuned/build.sh's RAFT_LIB_NAME (-DRAFT_OUTPUT_NAME=... baked into
 # this build dir's CMakeCache at configure time) -- the installed .so is
 # lib<this>.so, not the bare "libraft.so" upstream would otherwise produce.
@@ -80,7 +81,8 @@ echo "MD5:    ${MD5}"
 echo "Size:   ${SIZE}"
 echo "Files:  ${FILES}"
 
-cat > "${PROJECT_ROOT}/tuned/releases/CHECKSUMS_${GPU_TUNED_VARIANT}" <<EOF
+mkdir -p "${RELEASES_DIR}"
+cat > "${RELEASES_DIR}/CHECKSUMS_${GPU_TUNED_VARIANT}" <<EOF
 ${SHA256}  ${PKG_NAME}.tar.bz2
 ${MD5}  ${PKG_NAME}.tar.bz2
 EOF
