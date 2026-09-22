@@ -52,7 +52,7 @@ tested releases:
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| `v26.12-gb10-cu133-g9fcf3a1f` | _pending: the matching cuVS cu133 release is not yet published_ |
+| `v26.12-gb10-cu133-g9fcf3a1f` | [`v26.12-gb10-cu133-g1c38fcf18`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu133-g1c38fcf18) |
 
 The cuVS build made against this RAFT's CUDA 13.3 install passed its full test
 suite (35/35 gtest binaries; one known-flaky case, `KmeansFitBatchedTestF.Result/4`,
