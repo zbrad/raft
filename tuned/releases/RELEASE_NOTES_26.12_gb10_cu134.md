@@ -1,17 +1,29 @@
 # RAFT 26.12 — GB10 / DGX Spark Release Notes
 
-**Release Date**: 2026-09-18
-**Package**: `raft-26.12-gb10-cu134-g9d97792e.tar.bz2`
+**Release Date**: 2026-09-22
+**Package**: `raft-26.12-gb10-cu134-ga57c8910.tar.bz2`
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
-**Commit**: [`9d97792e`](https://github.com/zbrad/raft/commit/9d97792e)
+**Commit**: [`a57c8910`](https://github.com/zbrad/raft/commit/a57c8910)
 
 ## Overview
 
-CUDA toolkit bump (13.3 → 13.4) plus a real upstream sync
-(`upstream/main` merge, 318 files, 22 commits) needed to build cleanly
-against the newer toolkit — supersedes the previous
-`v26.10-gb10-cu133-g37ba10e2` release (2026-09-08).
+Supersedes `v26.12-gb10-cu134-g9d97792e` (2026-09-18). No library source
+changed between that release and this one (`git diff --stat
+9d97792e..a57c8910 -- cpp/` is empty) — this rebuild exists to publish
+under the CUDA-version-distinct output-directory layout (below), and to
+carry the `zbrad/cuvs` pairing note now that a cu133 raft/cuvs pair has
+been published (see "Compatible cuVS" below). Everything in the original
+`v26.12-gb10-cu134-g9d97792e` release notes' "What Changed" section
+(CUDA 13.4 toolkit, the `cuda::stream_ref` migration and its fallout,
+the fork-local `ComputeGraphLaplacianCOOLongNZType` fix) still applies
+unchanged to this build; not repeated here.
+
+**Build outputs are now CUDA-version-distinct.** `tuned/build.sh`,
+`package.sh` and `full_test.sh` write to `cpp/build/<cuda_tag>/<variant>`,
+`dist/<cuda_tag>/<variant>` and `tuned/releases/<cuda_tag>/` respectively,
+so a cu133 and cu134 build (or test-results gate) can no longer collide
+or silently satisfy each other's freshness check.
 
 ## What Changed
 
@@ -48,14 +60,32 @@ against the newer toolkit — supersedes the previous
 `GEMM_LARGE_TEST`, `LABEL_TEST`, `LINALG_TEST`,
 `MATRIX_SELECT_LARGE_TEST`, `MATRIX_SELECT_TEST`, `MATRIX_TEST`,
 `RANDOM_TEST`, `SOLVERS_TEST`, `SPARSE_TEST`, `STATS_TEST`, `UTILS_TEST`.
-237 individual tests passed. Full output attached as
-`TEST_RESULTS_gb10.log` on this release.
+237 individual tests passed. Re-run 2026-09-22 against this build (same
+counts as the original `9d97792e` run, as expected since no library
+source changed). Full output attached as `TEST_RESULTS_gb10.log` on this
+release.
+
+## Compatible cuVS
+
+This RAFT release is 26.12, so it pairs with cuVS 26.12 (`tuned-builds`,
+which tracks upstream `main`). See the CUDA 13.3 release notes
+(`RELEASE_NOTES_26.12_gb10_cu133.md`, "Compatible cuVS" section) for the
+full RAFT/cuVS version-pairing background — unchanged here, just repeated
+per CUDA toolkit below.
+
+| This RAFT release | cuVS release built and tested against it |
+|---|---|
+| `v26.12-gb10-cu134-ga57c8910` | _pending: the matching cuVS cu134 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu134-g6bb1419c` was built against the superseded `9d97792e`)_ |
+
+Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a
+different RAPIDS version, or against a different CUDA toolkit than the one this
+RAFT was built with, is not covered by these tests.
 
 ## Reproducing This Build
 
 ```
 git clone git@github.com:zbrad/raft.git && cd raft
-git checkout 9d97792e
+git checkout a57c8910
 GPU_TUNED_VARIANT=gb10 bash tuned/build.sh gb10   # pins rapids-cmake internally, see tuned/build.sh
 bash tuned/full_test.sh gb10                       # must pass before packaging
 bash tuned/package.sh gb10
@@ -113,8 +143,8 @@ published release to its commit + rapids-cmake pin.
 
 ### Extract the Package
 ```bash
-tar -xjf raft-26.12-gb10-cu134-g9d97792e.tar.bz2
-cd raft-26.12-gb10-cu134-g9d97792e
+tar -xjf raft-26.12-gb10-cu134-ga57c8910.tar.bz2
+cd raft-26.12-gb10-cu134-ga57c8910
 ```
 
 ### Set Up Environment
@@ -137,7 +167,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 ```bash
 mkdir build && cd build
 cmake \
-  -DCMAKE_PREFIX_PATH=/path/to/raft-26.12-gb10-cu134-g9d97792e \
+  -DCMAKE_PREFIX_PATH=/path/to/raft-26.12-gb10-cu134-ga57c8910 \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
   -DCMAKE_CUDA_ARCHITECTURES=121a \
@@ -165,6 +195,6 @@ sha256sum -c CHECKSUMS_gb10
 ---
 
 **RAFT Version**: 26.12.00
-**Release Date**: 2026-09-18
-**Package**: raft-26.12-gb10-cu134-g9d97792e.tar.bz2
+**Release Date**: 2026-09-22
+**Package**: raft-26.12-gb10-cu134-ga57c8910.tar.bz2
 **Platform**: aarch64 / SM_121a / CUDA 13.4
