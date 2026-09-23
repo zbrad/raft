@@ -310,17 +310,39 @@ gpu_tuned_verify_build_info() {
     echo "OK: ${file}'s ${section} section: ${content}"
 }
 
-# gpu_tuned_protect_torch_pin <venv-dir> <exact-torch-version> — guards a
+# gpu_tuned_protect_torch_pin <venv-dir> [<exact-torch-version>] — guards a
 # venv's tuned (non-PyPI) torch install against being silently swapped out
 # by a companion package's exact torch pin (e.g. `pip install torchvision`
 # hard-pins torch==2.13.0 and, without this, pip's resolver just
 # uninstalls whatever tuned build is there and installs that instead --
-# no warning). Writes <venv-dir>/../constraints-gb10.txt (one line: the
-# pinned torch version) and <venv-dir>/pip.conf (constraint= pointing at
-# it) -- pip reads {sys.prefix}/pip.conf automatically for any
-# venv-prefixed `pip`/`python -m pip` invocation, no activation needed.
-# Idempotent: safe to call again after rebuilding/reinstalling the tuned
-# torch wheel with its new version string.
+# no warning). <exact-torch-version> is read directly from the venv
+# itself (`<venv-dir>/bin/python -c 'import torch; print(torch.__version__)'`)
+# when omitted; pass it explicitly only to override.
+#
+# Deriving the version from the venv, rather than requiring the caller to
+# type or copy it in, is deliberate: a hand-typed/copy-pasted version
+# string from a DIFFERENT repo or session is exactly how zbrad/ComfyUI's
+# constraints-gb10.txt ended up pinning a torch build
+# (2.15.0+gb10.cu133.tuning.v29) that was never actually installed there
+# -- the real install stayed at
+# 2.14.0.dev20260707+gitc36325c5ba.gb10.cu133, so the guard was silently
+# protecting the wrong version (confirmed 2026-09-22; see that repo's
+# tuned_torch_venv_pip_constraint.md).
+#
+# The GPU codename (variant) is likewise extracted from the version
+# string itself -- the first "<variant>.cu<digits>" match (e.g. "gb10" in
+# "0.7.0+gb10.cu134.tuning.35", or in the legacy dev form
+# "2.14.0.dev20260707+gitc36325c5ba.gb10.cu133") -- and used to name the
+# constraints file (constraints-<variant>.txt) instead of the old
+# hardcoded "constraints-gb10.txt", which was wrong for any rtx40/rtx50
+# venv this ran against. Fails loudly, rather than defaulting to "gb10",
+# if no variant marker is found.
+#
+# Writes <venv-dir>/../constraints-<variant>.txt (one line: the pinned
+# torch version) and <venv-dir>/pip.conf (constraint= pointing at it) --
+# pip reads {sys.prefix}/pip.conf automatically for any venv-prefixed
+# `pip`/`python -m pip` invocation, no activation needed. Idempotent:
+# safe to call again after rebuilding/reinstalling the tuned torch wheel.
 #
 # Effect once wired in: a future `pip install torchvision` (or anything
 # else that hard-pins torch) fails loudly with a ResolutionImpossible
@@ -330,28 +352,50 @@ gpu_tuned_verify_build_info() {
 # a CUDA tensor, not just import -- see zbrad/ComfyUI project memory
 # for the torchvision/torchaudio compatibility checks done this way).
 gpu_tuned_protect_torch_pin() {
-    local venv_dir="$1" torch_version="$2"
-    if [[ -z "${venv_dir}" || -z "${torch_version}" ]]; then
-        echo "ERROR: gpu_tuned_protect_torch_pin: usage: gpu_tuned_protect_torch_pin <venv-dir> <exact-torch-version>" >&2
+    local venv_dir="$1" torch_version="${2:-}"
+    if [[ -z "${venv_dir}" ]]; then
+        echo "ERROR: gpu_tuned_protect_torch_pin: usage: gpu_tuned_protect_torch_pin <venv-dir> [<exact-torch-version>]" >&2
         return 1
     fi
     if [[ ! -d "${venv_dir}" ]]; then
         echo "ERROR: gpu_tuned_protect_torch_pin: no such venv dir: ${venv_dir}" >&2
         return 1
     fi
+    if [[ -z "${torch_version}" ]]; then
+        local py="${venv_dir}/bin/python"
+        if [[ ! -x "${py}" ]]; then
+            echo "ERROR: gpu_tuned_protect_torch_pin: no python at ${py}" >&2
+            return 1
+        fi
+        torch_version="$("${py}" -c 'import torch; print(torch.__version__)' 2>/dev/null)" || true
+        if [[ -z "${torch_version}" ]]; then
+            echo "ERROR: gpu_tuned_protect_torch_pin: '${py} -c \"import torch\"' produced no version -- is torch installed in ${venv_dir}?" >&2
+            return 1
+        fi
+    fi
+
+    local variant
+    variant="$(grep -oE '[a-z][a-z0-9]*\.cu[0-9]+' <<< "${torch_version}" | head -1 | sed -E 's/\.cu[0-9]+$//')" || true
+    if [[ -z "${variant}" ]]; then
+        echo "ERROR: gpu_tuned_protect_torch_pin: no '<variant>.cu<digits>' marker found in '${torch_version}' -- not a tuned build?" >&2
+        return 1
+    fi
+
     local repo_dir constraints_file
     repo_dir="$(cd "${venv_dir}/.." && pwd)"
-    constraints_file="${repo_dir}/constraints-gb10.txt"
+    constraints_file="${repo_dir}/constraints-${variant}.txt"
 
     cat > "${constraints_file}" <<EOF
-# Pins the GB10-tuned torch build so any future \`pip install\` in this venv
-# is forced to keep it -- without this, pip's resolver treats an exact
-# torch pin from a dependency (e.g. torchvision/torchaudio hard-pinning a
-# specific torch version) as authoritative and silently uninstalls the
-# tuned build in favor of a generic PyPI one. Wired in via
+# Pins the ${variant}-tuned torch build so any future \`pip install\` in
+# this venv is forced to keep it -- without this, pip's resolver treats
+# an exact torch pin from a dependency (e.g. torchvision/torchaudio
+# hard-pinning a specific torch version) as authoritative and silently
+# uninstalls the tuned build in favor of a generic PyPI one. Wired in via
 # <venv>/pip.conf's [install] constraint=. Generated by
-# gpu_tuned_protect_torch_pin (zbrad/tuned-common) -- rerun it whenever
-# the tuned torch wheel is rebuilt/reinstalled to refresh this pin.
+# gpu_tuned_protect_torch_pin (zbrad/tuned-common), which reads this
+# version directly from the venv's own \`torch.__version__\` -- rerun it
+# whenever the tuned torch wheel is rebuilt/reinstalled to refresh this
+# pin, rather than hand-editing the version string below.
 torch==${torch_version}
 EOF
 
