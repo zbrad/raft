@@ -1,31 +1,48 @@
 # RAFT 26.12 — GB10 / DGX Spark Release Notes
 
-**Release Date**: 2026-09-22
-**Package**: `raft-26.12-gb10-cu134-ga57c8910.tar.bz2`
+**Release Date**: 2026-10-12
+**Package**: `raft-26.12-gb10-cu134-g<commit>.tar.bz2` (`<commit>` is the 8-hex suffix of this release's tag)
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
-**Commit**: [`a57c8910`](https://github.com/zbrad/raft/commit/a57c8910)
+**Commit**: the tag's `-g<commit>` suffix; `git log --oneline` from it shows exactly what is in this release
 
 ## Overview
 
-Supersedes `v26.12-gb10-cu134-g9d97792e` (2026-09-18). No library source
-changed between that release and this one (`git diff --stat
-9d97792e..a57c8910 -- cpp/` is empty) — this rebuild exists to publish
-under the CUDA-version-distinct output-directory layout (below), and to
-carry the `zbrad/cuvs` pairing note now that a cu133 raft/cuvs pair has
-been published (see "Compatible cuVS" below). Everything in the original
-`v26.12-gb10-cu134-g9d97792e` release notes' "What Changed" section
-(CUDA 13.4 toolkit, the `cuda::stream_ref` migration and its fallout,
-the fork-local `ComputeGraphLaplacianCOOLongNZType` fix) still applies
-unchanged to this build; not repeated here.
+Supersedes `v26.12-gb10-cu134-ga57c8910` (2026-09-22). This build brings `tuned-builds` up to
+upstream `rapidsai/raft` `main` at `56b4b2ef` by merging 9 upstream commits it did not have: `#3161`
+build type override via env var, `#3118` sparse MST solver performance, `#3133` no unintended FP64
+promotion in float kernels, `#3170` per-cluster std indexing fix in `make_blobs`, `#3163` removal of
+the remaining `rmm/cuda_stream_view.hpp` includes, `#3164`, `#3167` and `#3162` (CI, docs and wheel
+size housekeeping), and the changelog. It also finishes the fork-local test fix described below and
+publishes the first build made in the new per-toolkit build layout. No release tag shape change:
+consumers that look up `v<ver>-<variant>-<cuda>-g<sha>` (zbrad/cuvs, zbrad/faiss) are unaffected.
 
-**Build outputs are now CUDA-version-distinct.** `tuned/build.sh`,
-`package.sh` and `full_test.sh` write to `cpp/build/<cuda_tag>/<variant>`,
-`dist/<cuda_tag>/<variant>` and `tuned/releases/<cuda_tag>/` respectively,
-so a cu133 and cu134 build (or test-results gate) can no longer collide
-or silently satisfy each other's freshness check.
+**Build outputs now live in one tree per toolkit, `tuned/build/<cuda_tag>/`** (no variant level):
+`cmake/` (the one fixed compile path), `dist/`, `dist-shared/`, `releases/` (generated checksums
+and test logs), `ccache/`, `timing.tsv`. Before, they were `cpp/build/<cuda_tag>/<variant>`,
+`dist/<cuda_tag>/<variant>` and `tuned/releases/<cuda_tag>/`. The fixed compile path is what lets
+ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall time (262 targets,
+4,140 s summed) against 1 s warm with 240/240 ccache hits (20 s for the whole `build.sh`).
 
 ## What Changed
+
+- **Upstream sync to `main` `56b4b2ef`** (the 9 commits listed above). Gate output: all
+  fork markers held (137 `gpu_tuned_` lines before and after); the one file the tool flagged,
+  `dependencies.yaml`, lost 24 lines only because upstream itself removed six nightly
+  `extra-index-url` blocks that our commits never touched.
+- **Fork-local regression test fixed, again.** `run_warp_reduce_with_add_op` (our
+  `7fcef655`, the warpReduce/`raft::add_op` ambiguity test) still took `rmm::cuda_stream_view`
+  and launched with `<<<>>>`; upstream's `#3129` had moved the rest of that file to
+  `cuda::stream_ref`, `raft::launch_kernel` and `stream.sync()`, and this merge's `#3163` removed the
+  last include that still declared `rmm::cuda_stream_view` there, so `UTILS_TEST` failed to compile.
+  Fixed in `67b37c2b`.
+- **`tuned/build.sh` now fails when a target did not build.** The gap recorded in the previous
+  notes ("does not fail the script when a test target fails to compile") is closed in `80490e0c`:
+  a ninja dry run after the build must show no pending compile and no pending link whose
+  executable is missing. It mattered here: the first test run on this merge reported
+  "15/15 passed" while `UTILS_TEST` was silently absent, and was discarded.
+- **`tuned/package.sh` writes the tarball to `tuned/build/<cuda_tag>/dist/`**, not the repo root,
+  and `tuned/build.sh` runs an explicit `cmake --install` (the install tree it packages).
 
 - **CUDA 13.4 toolkit.** `gpu_tuned_resolve_cuda_home` auto-selects the
   highest installed `/usr/local/cuda-<ver>` toolkit; no script changes
@@ -54,16 +71,16 @@ or silently satisfy each other's freshness check.
 
 ## Full Test Suite Result
 
-**16/16 gtest binaries passed, 0 failures** — `CORE_TEST`,
-`CORE_TEST_NOCUDA`, `EXT_HEADERS_TEST_COMPILED_EXPLICIT`,
-`EXT_HEADERS_TEST_COMPILED_IMPLICIT`, `EXT_HEADERS_TEST_IMPLICIT`,
-`GEMM_LARGE_TEST`, `LABEL_TEST`, `LINALG_TEST`,
-`MATRIX_SELECT_LARGE_TEST`, `MATRIX_SELECT_TEST`, `MATRIX_TEST`,
-`RANDOM_TEST`, `SOLVERS_TEST`, `SPARSE_TEST`, `STATS_TEST`, `UTILS_TEST`.
-237 individual tests passed. Re-run 2026-09-22 against this build (same
-counts as the original `9d97792e` run, as expected since no library
-source changed). Full output attached as `TEST_RESULTS_gb10.log` on this
-release.
+**16/16 gtest binaries passed, 0 failed; 7,605 tests passed, 44 skipped.** Binaries:
+`CORE_TEST`, `CORE_TEST_NOCUDA`, `EXT_HEADERS_TEST_COMPILED_EXPLICIT`,
+`EXT_HEADERS_TEST_COMPILED_IMPLICIT`, `EXT_HEADERS_TEST_IMPLICIT`, `GEMM_LARGE_TEST`,
+`LABEL_TEST`, `LINALG_TEST`, `MATRIX_SELECT_LARGE_TEST`, `MATRIX_SELECT_TEST`, `MATRIX_TEST`,
+`RANDOM_TEST`, `SOLVERS_TEST`, `SPARSE_TEST`, `STATS_TEST`, `UTILS_TEST` (237 tests, including the
+fork-local `WarpReduceAddOpTest`). Skipped: 4 in `CORE_TEST` that require at least 2 CUDA devices
+(this host has one GPU), and 40 `SelectK` parameter cases in `MATRIX_SELECT_TEST` that the test
+itself skips (`select_k.cuh:232`, no reason printed). Run 2026-10-12 against the build at commit
+`80490e0c`, started 09:49Z and finished 10:11Z. Full output attached as `TEST_RESULTS_gb10.log` on
+this release.
 
 ## Compatible cuVS
 
@@ -75,7 +92,7 @@ per CUDA toolkit below.
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| `v26.12-gb10-cu134-ga57c8910` | _pending: the matching cuVS cu134 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu134-g6bb1419c` was built against the superseded `9d97792e`)_ |
+| this release | _pending: the matching cuVS cu134 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu134-g6bb1419c` was built against the superseded `9d97792e`)_ |
 
 Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a
 different RAPIDS version, or against a different CUDA toolkit than the one this
@@ -85,7 +102,7 @@ RAFT was built with, is not covered by these tests.
 
 ```
 git clone git@github.com:zbrad/raft.git && cd raft
-git checkout a57c8910
+git checkout <the release tag>
 GPU_TUNED_VARIANT=gb10 bash tuned/build.sh gb10   # pins rapids-cmake internally, see tuned/build.sh
 bash tuned/full_test.sh gb10                       # must pass before packaging
 bash tuned/package.sh gb10
@@ -143,8 +160,8 @@ published release to its commit + rapids-cmake pin.
 
 ### Extract the Package
 ```bash
-tar -xjf raft-26.12-gb10-cu134-ga57c8910.tar.bz2
-cd raft-26.12-gb10-cu134-ga57c8910
+tar -xjf raft-26.12-gb10-cu134-g<commit>.tar.bz2
+cd raft-26.12-gb10-cu134-g<commit>
 ```
 
 ### Set Up Environment
@@ -167,7 +184,7 @@ target_link_libraries(my_target PRIVATE raft::raft)
 ```bash
 mkdir build && cd build
 cmake \
-  -DCMAKE_PREFIX_PATH=/path/to/raft-26.12-gb10-cu134-ga57c8910 \
+  -DCMAKE_PREFIX_PATH=/path/to/raft-26.12-gb10-cu134-g<commit> \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_CUDA_STANDARD=20 \
   -DCMAKE_CUDA_ARCHITECTURES=121a \
@@ -195,6 +212,6 @@ sha256sum -c CHECKSUMS_gb10
 ---
 
 **RAFT Version**: 26.12.00
-**Release Date**: 2026-09-22
-**Package**: raft-26.12-gb10-cu134-ga57c8910.tar.bz2
+**Release Date**: 2026-10-12
+**Package**: raft-26.12-gb10-cu134-g<commit>.tar.bz2
 **Platform**: aarch64 / SM_121a / CUDA 13.4
