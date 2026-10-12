@@ -8,14 +8,16 @@
 
 ## Overview
 
-Supersedes `v26.12-gb10-cu134-ga57c8910` (2026-09-22). This build brings `tuned-builds` up to
-upstream `rapidsai/raft` `main` at `56b4b2ef` by merging 9 upstream commits it did not have: `#3161`
-build type override via env var, `#3118` sparse MST solver performance, `#3133` no unintended FP64
-promotion in float kernels, `#3170` per-cluster std indexing fix in `make_blobs`, `#3163` removal of
-the remaining `rmm/cuda_stream_view.hpp` includes, `#3164`, `#3167` and `#3162` (CI, docs and wheel
-size housekeeping), and the changelog. It also finishes the fork-local test fix described below and
-publishes the first build made in the new per-toolkit build layout. No release tag shape change:
-consumers that look up `v<ver>-<variant>-<cuda>-g<sha>` (zbrad/cuvs, zbrad/faiss) are unaffected.
+Supersedes `v26.12-gb10-cu134-g3a508503` (published earlier the same day, rapids-cmake `8fc2d05e`),
+which itself superseded `v26.12-gb10-cu134-ga57c8910` (2026-09-22). This build brings `tuned-builds`
+up to upstream `rapidsai/raft` `main` at `56b4b2ef` by merging 9 upstream commits it did not have:
+`#3161` build type override via env var, `#3118` sparse MST solver performance, `#3133` no
+unintended FP64 promotion in float kernels, `#3170` per-cluster std indexing fix in `make_blobs`,
+`#3163` removal of the remaining `rmm/cuda_stream_view.hpp` includes, `#3164`, `#3167` and `#3162`
+(CI, docs and wheel size housekeeping), and the changelog. It also finishes the fork-local test fix
+described below, moves the shared rapids-cmake pin (below), and publishes the first build made in
+the new per-toolkit build layout. No release tag shape change: consumers that look up
+`v<ver>-<variant>-<cuda>-g<sha>` (zbrad/cuvs, zbrad/faiss) are unaffected.
 
 **Build outputs now live in one tree per toolkit, `tuned/build/<cuda_tag>/`** (no variant level):
 `cmake/` (the one fixed compile path), `dist/`, `dist-shared/`, `releases/` (generated checksums
@@ -25,6 +27,16 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
 4,140 s summed) against 1 s warm with 240/240 ccache hits (20 s for the whole `build.sh`).
 
 ## What Changed
+
+- **Shared rapids-cmake pin moved `8fc2d05e` -> `61a96c8f`.** rapids-cmake's "Update cuco for
+  RoaringBitmap use in cuVS (#1095)". The merged zbrad/cuvs (upstream `#2446`, roaring-bitmap CAGRA
+  filter) calls `cuco::roaring_bitmap::from_indices`, which the older pinned cuco lacks, so cuvs could
+  not compile against the old pin. Exactly two packages differ between the pins, read from each
+  commit's `rapids-cmake/cpm/versions.json`: **cuco** `4b26118c` -> `8ed532dc` (raft does not use or
+  export cuco), and **CCCL**, labelled 3.5.0 in both, commit `399863ef` -> `b98d4bd6` (the 3.5.0-rc1
+  update, which raft does build against). This build's configure log shows it fetched the new
+  rapids-cmake and found CCCL 3.5.0; the library is rebuilt and the whole suite rerun under the new
+  pin, same counts as before. Changed in zbrad/cuvs in the same sitting (sibling pin).
 
 - **Upstream sync to `main` `56b4b2ef`** (the 9 commits listed above). Gate output: all
   fork markers held (137 `gpu_tuned_` lines before and after); the one file the tool flagged,
@@ -79,7 +91,8 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
 fork-local `WarpReduceAddOpTest`). Skipped: 4 in `CORE_TEST` that require at least 2 CUDA devices
 (this host has one GPU), and 40 `SelectK` parameter cases in `MATRIX_SELECT_TEST` that the test
 itself skips (`select_k.cuh:232`, no reason printed). Run 2026-10-12 against the build at commit
-`80490e0c`, started 09:49Z and finished 10:11Z. Full output attached as `TEST_RESULTS_gb10.log` on
+`798e2ea8` (the new rapids-cmake pin), started 10:51Z and finished 11:11Z; the same counts came out
+of the earlier run on the old pin (commit `80490e0c`). Full output attached as `TEST_RESULTS_gb10.log` on
 this release.
 
 ## Compatible cuVS
@@ -111,7 +124,7 @@ bash tuned/package.sh gb10
 The exact `rapids-cmake` source this build (and `bash tuned/build.sh`
 above) resolves against:
 ```
-https://github.com/rapidsai/rapids-cmake/archive/8fc2d05e4b29a2fb7a355192ce19190fcf24c37f.zip
+https://github.com/rapidsai/rapids-cmake/archive/61a96c8f29731affd7fd913a586673dd057dc3b0.zip
 ```
 See `tuned/docs/RELEASE_PINS.md` for the full table mapping every
 published release to its commit + rapids-cmake pin.
