@@ -50,6 +50,24 @@ ccache -z >/dev/null 2>&1 || true
 
 LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA}\""
 
+# Completeness gate. Upstream's build.sh exits 0 even when a test target fails to compile (a
+# release was nearly published with UTILS_TEST silently missing), and tuned/full_test.sh only runs
+# the binaries that exist, so a broken target would simply not be tested. A ninja dry run lists what
+# is still pending: any compile step, or a link whose executable does not exist, means a target did
+# not build. (Re-links of existing test binaries after build-info is stamped into the library are
+# normal and are not failures.)
+PENDING_BAD="$(cmake --build "${BUILD_DIR}" --target all -- -n 2>&1 | while IFS= read -r line; do
+    case "${line}" in
+        *"Building "*) echo "${line}" ;;
+        *"Linking "*" executable "*) [[ -e "${BUILD_DIR}/${line##* }" ]] || echo "${line}" ;;
+    esac
+done)"
+if [[ -n "${PENDING_BAD}" ]]; then
+    echo "ERROR: the build is incomplete -- a target failed to compile or link (upstream's build.sh did not fail):" >&2
+    printf '%s\n' "${PENDING_BAD}" | head -10 | sed 's/^/  /' >&2
+    exit 1
+fi
+
 echo ""
 echo "Build timing (wall $(( EPOCHSECONDS - BUILD_T0 ))s):"
 if [[ -f "${NINJA_LOG}" ]] && gpu_tuned_ninja_timing "${NINJA_LOG}" "${NINJA_OFFSET}" "${GPU_TUNED_BUILD_ROOT}/timing.tsv" "CMakeFiles/"; then
