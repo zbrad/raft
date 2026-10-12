@@ -59,6 +59,49 @@ current_sha() {
     [[ -f "${SHA_FILE}" ]] && cat "${SHA_FILE}" || echo "unknown"
 }
 
+# Data files (devices/*.conf, toolkits/*.env, toolkits/DEFAULT) are vendored into
+# <this dir>/common-data/ only when that directory already exists, so a
+# consumer opts in with `mkdir tuned/common-data` and repos that keep their
+# own device files are untouched. Files are overwritten from upstream; local
+# files upstream does not have are reported and never deleted.
+DATA_DIR="${SELF_DIR}/common-data"
+
+# sync_data <resolved-sha> — vendor the data files at that commit.
+sync_data() {
+    local sha="$1" paths path tmp changed=0 listed=""
+    paths="$(curl -fsSL "${REPO_API_BASE}/git/trees/${sha}?recursive=1" \
+        | jq -r '.tree[] | select(.type == "blob") | .path' \
+        | grep -E '^(devices/[^/]+\.conf|toolkits/[^/]+\.env|toolkits/DEFAULT)$' || true)"
+    while IFS= read -r path; do
+        [[ -n "${path}" ]] || continue
+        listed+="${path}"$'\n'
+        tmp="$(mktemp)"
+        curl -fsSL -o "${tmp}" "${REPO_RAW_BASE}/${sha}/${path}" || {
+            rm -f "${tmp}"
+            die "fetch failed for ${REPO_RAW_BASE}/${sha}/${path}"
+        }
+        bash -n "${tmp}" || {
+            rm -f "${tmp}"
+            die "${path} failed a syntax check -- refusing to overwrite it"
+        }
+        if [[ -f "${DATA_DIR}/${path}" ]] && diff -q "${tmp}" "${DATA_DIR}/${path}" >/dev/null 2>&1; then
+            rm -f "${tmp}"
+        else
+            [[ -f "${DATA_DIR}/${path}" ]] && diff -u "${DATA_DIR}/${path}" "${tmp}" || true
+            mkdir -p "${DATA_DIR}/$(dirname "${path}")"
+            mv "${tmp}" "${DATA_DIR}/${path}"
+            echo "Updated ${DATA_DIR}/${path}"
+            changed=$((changed + 1))
+        fi
+    done <<< "${paths}"
+    echo "Data files: ${changed} updated, $(grep -c . <<< "${listed}") at ${sha}"
+    local f rel
+    while IFS= read -r f; do
+        rel="${f#"${DATA_DIR}"/}"
+        grep -qxF "${rel}" <<< "${listed}" || echo "NOTE: local extra, not in upstream (left in place): ${f}"
+    done < <(find "${DATA_DIR}" -type f | sort)
+}
+
 cmd="${1:-check}"
 
 case "${cmd}" in
@@ -99,6 +142,7 @@ case "${cmd}" in
             mv "${tmp}" "${TARGET}"
             echo "Updated ${TARGET}"
         fi
+        [[ -d "${DATA_DIR}" ]] && sync_data "${resolved}"
         echo "${resolved}" > "${SHA_FILE}"
         echo "OK: synced to ${resolved}"
         ;;

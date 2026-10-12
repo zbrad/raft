@@ -199,6 +199,299 @@ gpu_tuned_verify_cccl_version() {
     echo "OK: CCCL ${found_major}.${found_minor}.${found_patch} meets the minimum required version (${min_version})"
 }
 
+# gpu_tuned_load_toolkit <data-dir> <variant> [<toolkit-id>] — selects a CUDA
+# toolkit from <data-dir>/toolkits/<toolkit-id>.env (e.g. cu133), then
+# sources the optional <data-dir>/toolkits/<variant>-<toolkit-id>.env, which
+# overrides any key. With no id it uses the highest defined toolkit (by its
+# declared TOOLKIT_CUDA_VER, not by file name) and says so on stderr, naming
+# the whole list and the reason. It only ever picks from the toolkit files,
+# never from /usr/local/cuda or from what happens to be installed. An unknown
+# id is an error that lists the available ones, and an already-set CUDA_HOME
+# that differs from the toolkit's is rejected rather than trusted. Exports
+# CUDA_VER, CUDA_TAG, CUDA_HOME, GPU_TUNED_TOOLKIT_LIB_DIR (the toolkit's own
+# targets/<arch>-linux/lib, from GPU_TUNED_PLATFORM when set, else uname -m)
+# and prepends $CUDA_HOME/bin to PATH. It does not check the install: call
+# gpu_tuned_verify_toolkit for that.
+gpu_tuned_load_toolkit() {
+    local data_dir="$1" variant="$2" tk="${3:-}"
+    if [[ -z "${tk}" ]]; then
+        local f v listing="" best="" best_v=""
+        for f in "${data_dir}"/toolkits/*.env; do
+            [[ -f "${f}" ]] || continue
+            [[ "$(basename "${f}" .env)" == "${variant}-"* ]] && continue   # per-variant override file
+            v="$(sed -n 's/^TOOLKIT_CUDA_VER="\(.*\)"$/\1/p' "${f}" | head -1)"
+            listing+=" $(basename "${f}" .env)(${v:-?})"
+            if [[ -n "${v}" && ( -z "${best_v}" || "$(printf '%s\n%s\n' "${best_v}" "${v}" | sort -V | tail -1)" == "${v}" ) ]]; then
+                best="$(basename "${f}" .env)"; best_v="${v}"
+            fi
+        done
+        if [[ -z "${best}" ]]; then
+            echo "ERROR: gpu_tuned_load_toolkit: no toolkit given and none defined under ${data_dir}/toolkits" >&2
+            return 1
+        fi
+        echo "[toolkit] available:${listing}" >&2
+        local dflt=""
+        if [[ -f "${data_dir}/toolkits/DEFAULT" ]]; then
+            dflt="$(tr -d '[:space:]' < "${data_dir}/toolkits/DEFAULT")"
+            if [[ ! -f "${data_dir}/toolkits/${dflt}.env" ]]; then
+                echo "ERROR: gpu_tuned_load_toolkit: ${data_dir}/toolkits/DEFAULT names '${dflt}', which has no toolkits/${dflt}.env." >&2
+                return 1
+            fi
+            echo "[toolkit] using ${dflt}: none was specified, so the default named in toolkits/DEFAULT is used (highest defined is ${best})." >&2
+            echo "[toolkit] to choose another, set CUDA_TAG (e.g. CUDA_TAG=${best}) or CUDA_VER." >&2
+            tk="${dflt}"
+        else
+            echo "[toolkit] using ${best} (CUDA ${best_v}): none was specified, so the highest defined toolkit is used." >&2
+            echo "[toolkit] to choose another, set CUDA_TAG (e.g. CUDA_TAG=${best}) or CUDA_VER." >&2
+            tk="${best}"
+        fi
+    fi
+    local base="${data_dir}/toolkits/${tk}.env"
+    local over="${data_dir}/toolkits/${variant}-${tk}.env"
+    if [[ ! -f "${base}" ]]; then
+        local f avail=""
+        for f in "${data_dir}"/toolkits/*.env; do
+            [[ -f "${f}" ]] && avail+=" $(basename "${f}" .env)"
+        done
+        echo "ERROR: gpu_tuned_load_toolkit: no toolkit file ${base}" >&2
+        echo "       available toolkits:${avail:- (none)}" >&2
+        return 1
+    fi
+    unset TOOLKIT_ID TOOLKIT_CUDA_VER TOOLKIT_CUDA_HOME TOOLKIT_NVCC_RELEASE TOOLKIT_NCCL_VERSION
+    # shellcheck disable=SC1090
+    source "${base}"
+    # shellcheck disable=SC1090
+    [[ -f "${over}" ]] && source "${over}"
+    local k
+    for k in TOOLKIT_ID TOOLKIT_CUDA_VER TOOLKIT_CUDA_HOME TOOLKIT_NVCC_RELEASE; do
+        if [[ -z "${!k:-}" ]]; then
+            echo "ERROR: gpu_tuned_load_toolkit: ${base} does not set ${k}" >&2
+            return 1
+        fi
+    done
+    if [[ "${TOOLKIT_ID}" != "${tk}" ]]; then
+        echo "ERROR: gpu_tuned_load_toolkit: ${base} sets TOOLKIT_ID=${TOOLKIT_ID}, expected ${tk}" >&2
+        return 1
+    fi
+    if [[ -n "${CUDA_HOME:-}" && "${CUDA_HOME}" != "${TOOLKIT_CUDA_HOME}" ]]; then
+        echo "ERROR: gpu_tuned_load_toolkit: CUDA_HOME is '${CUDA_HOME}' but toolkit ${tk} requires ${TOOLKIT_CUDA_HOME}." >&2
+        echo "       Unset CUDA_HOME or point it at the toolkit-versioned directory." >&2
+        return 1
+    fi
+    local platform="${GPU_TUNED_PLATFORM:-$(uname -m)}" target
+    case "${platform}" in
+        aarch64) target="sbsa-linux" ;;
+        x86_64) target="x86_64-linux" ;;
+        *) echo "ERROR: gpu_tuned_load_toolkit: unsupported platform '${platform}'" >&2; return 1 ;;
+    esac
+    export CUDA_VER="${TOOLKIT_CUDA_VER}"
+    export CUDA_TAG="${tk}"
+    export CUDA_HOME="${TOOLKIT_CUDA_HOME}"
+    export GPU_TUNED_TOOLKIT_LIB_DIR="${CUDA_HOME}/targets/${target}/lib"
+    export PATH="${CUDA_HOME}/bin:${PATH}"
+}
+
+# gpu_tuned_verify_toolkit — after gpu_tuned_load_toolkit, confirms the
+# install matches its definition: nvcc exists under CUDA_HOME and reports the
+# declared "release X.Y", and (when TOOLKIT_NCCL_VERSION is set) the installed
+# libnccl2 package is exactly that version. A mismatched NCCL is the quiet
+# failure: apt holds one libnccl2 at a time, so a toolkit other than the one
+# it was built for would be bundled with a foreign NCCL.
+gpu_tuned_verify_toolkit() {
+    if [[ -z "${TOOLKIT_ID:-}" ]]; then
+        echo "ERROR: gpu_tuned_verify_toolkit: no toolkit loaded (call gpu_tuned_load_toolkit first)." >&2
+        return 1
+    fi
+    if [[ "${CUDA_HOME:-}" != "${TOOLKIT_CUDA_HOME}" ]]; then
+        echo "ERROR: gpu_tuned_verify_toolkit: CUDA_HOME is '${CUDA_HOME:-}', expected ${TOOLKIT_CUDA_HOME}." >&2
+        return 1
+    fi
+    if [[ ! -x "${CUDA_HOME}/bin/nvcc" ]]; then
+        echo "ERROR: gpu_tuned_verify_toolkit: ${CUDA_HOME}/bin/nvcc not found; toolkit ${TOOLKIT_ID} is not installed." >&2
+        return 1
+    fi
+    local found
+    found="$("${CUDA_HOME}/bin/nvcc" --version 2>/dev/null | grep -oE 'release [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true)"
+    if [[ "${found}" != "${TOOLKIT_NVCC_RELEASE}" ]]; then
+        echo "ERROR: gpu_tuned_verify_toolkit: ${CUDA_HOME}/bin/nvcc reports release '${found}', toolkit ${TOOLKIT_ID} declares ${TOOLKIT_NVCC_RELEASE}." >&2
+        return 1
+    fi
+    if [[ -n "${TOOLKIT_NCCL_VERSION:-}" ]]; then
+        if ! command -v dpkg-query >/dev/null 2>&1; then
+            echo "WARNING: gpu_tuned_verify_toolkit: dpkg-query not found; NCCL ${TOOLKIT_NCCL_VERSION} not checked." >&2
+        else
+            local nccl
+            nccl="$(dpkg-query -W -f='${Version}' libnccl2 2>/dev/null || true)"
+            if [[ "${nccl}" != "${TOOLKIT_NCCL_VERSION}" ]]; then
+                echo "ERROR: gpu_tuned_verify_toolkit: libnccl2 is '${nccl:-not installed}', toolkit ${TOOLKIT_ID} declares ${TOOLKIT_NCCL_VERSION}." >&2
+                return 1
+            fi
+        fi
+    fi
+    echo "OK: toolkit ${TOOLKIT_ID}: nvcc ${found} at ${CUDA_HOME}${TOOLKIT_NCCL_VERSION:+, libnccl2 ${TOOLKIT_NCCL_VERSION}}"
+}
+
+# gpu_tuned_verify_toolkit_libs <elf>... — resolves each file's libraries
+# with ldd under LD_LIBRARY_PATH=$GPU_TUNED_TOOLKIT_LIB_DIR and requires that
+# libcudart/libcublas/libcublasLt come from under CUDA_HOME and that no
+# library comes from a different /usr/local/cuda* tree. Without this, the
+# loader's ld.so.conf entries (which follow the /usr/local/cuda symlink to the
+# newest toolkit) can satisfy the lookup from the wrong version and a
+# "does it load" test passes against the wrong runtime.
+gpu_tuned_verify_toolkit_libs() {
+    if [[ -z "${GPU_TUNED_TOOLKIT_LIB_DIR:-}" ]]; then
+        echo "ERROR: gpu_tuned_verify_toolkit_libs: no toolkit loaded (call gpu_tuned_load_toolkit first)." >&2
+        return 1
+    fi
+    local f line name path real rc=0
+    for f in "$@"; do
+        while IFS= read -r line; do
+            # ldd lines are "<tab>name => path (addr)"; awk also trims the tab.
+            name="$(awk '{ print $1 }' <<< "${line}")"
+            path="$(awk '{ for (i = 1; i <= NF; i++) if ($i == "=>") { print $(i + 1); exit } }' <<< "${line}")"
+            [[ "${path}" == /* ]] || continue
+            real="$(readlink -f "${path}")"
+            if [[ "${name}" =~ ^lib(cudart|cublas|cublasLt)\.so ]] && [[ "${real}" != "${CUDA_HOME}"/* ]]; then
+                echo "ERROR: $(basename "${f}"): ${name} resolves to ${real}, not under ${CUDA_HOME}." >&2
+                rc=1
+            elif [[ "${real}" == /usr/local/cuda* && "${real}" != "${CUDA_HOME}"/* ]]; then
+                echo "ERROR: $(basename "${f}"): ${name} resolves to ${real}, a different CUDA tree than ${CUDA_HOME}." >&2
+                rc=1
+            fi
+        done < <(LD_LIBRARY_PATH="${GPU_TUNED_TOOLKIT_LIB_DIR}" ldd "${f}" 2>/dev/null || true)
+    done
+    return "${rc}"
+}
+
+# gpu_tuned_load_repo_env <file> — sources a repo's tuned/repo.env, which holds
+# only what is specific to that repo (CMake flags, paths, extra packages) and
+# must never change what the shared device and toolkit files decided. After
+# sourcing, every protected key (hardware, toolkit, CUDA_*) is compared with
+# its value from before; ALL changed, newly set or unset keys are reported in
+# one loud block and the function fails, so a repo cannot quietly drift from
+# the shared definitions. Call it after gpu_tuned_load_toolkit.
+GPU_TUNED_PROTECTED_KEYS=(
+    GPU_TUNED_VARIANT GPU_TUNED_PLATFORM GPU_TUNED_CUDA_ARCH GPU_TUNED_HW_LABEL
+    GPU_TUNED_TOOLKIT_LIB_DIR CUDA_VER CUDA_TAG CUDA_HOME
+    TOOLKIT_ID TOOLKIT_CUDA_VER TOOLKIT_CUDA_HOME TOOLKIT_NVCC_RELEASE TOOLKIT_NCCL_VERSION
+)
+gpu_tuned_load_repo_env() {
+    local file="$1"
+    if [[ ! -f "${file}" ]]; then
+        echo "ERROR: gpu_tuned_load_repo_env: no such file: ${file}" >&2
+        return 1
+    fi
+    local k
+    local -A was_set=() was_val=()
+    for k in "${GPU_TUNED_PROTECTED_KEYS[@]}"; do
+        if [[ -n "${!k+x}" ]]; then was_set[${k}]=1; was_val[${k}]="${!k}"; else was_set[${k}]=0; fi
+    done
+    # shellcheck disable=SC1090
+    source "${file}"
+    local conflicts=""
+    for k in "${GPU_TUNED_PROTECTED_KEYS[@]}"; do
+        if [[ -n "${!k+x}" ]]; then
+            if [[ "${was_set[${k}]}" -eq 0 ]]; then
+                conflicts+="    ${k}: was unset, ${file##*/} sets it to '${!k}'"$'\n'
+            elif [[ "${!k}" != "${was_val[${k}]}" ]]; then
+                conflicts+="    ${k}: '${was_val[${k}]}' -> '${!k}'"$'\n'
+            fi
+        elif [[ "${was_set[${k}]}" -eq 1 ]]; then
+            conflicts+="    ${k}: '${was_val[${k}]}' -> (unset)"$'\n'
+        fi
+    done
+    if [[ -n "${conflicts}" ]]; then
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+        echo "ERROR: ${file} conflicts with the shared device/toolkit definitions:" >&2
+        printf '%s' "${conflicts}" >&2
+        echo "  repo.env may only add repo-specific settings. Remove these lines, or" >&2
+        echo "  change the shared file in zbrad/tuned-common if the shared value is wrong." >&2
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+        return 1
+    fi
+}
+
+# gpu_tuned_public_repo_url <remote-url> — the public https form of a git
+# remote, safe to stamp into a published binary: scp-style and ssh:// remotes
+# become https://<host>/<path>, any userinfo (including an `org-123@` SSH host
+# alias or an embedded token) is dropped, and a trailing .git is removed.
+gpu_tuned_public_repo_url() {
+    printf '%s' "${1:-}" | sed -E \
+        's#\.git$##; s#^ssh://[^@/]*@([^/:]+)(:[0-9]+)?/#https://\1/#; s#^[^@/:]+@([^:/]+):#https://\1/#; s#^(https?://)[^/@]*@#\1#'
+}
+
+# gpu_tuned_git_provenance [fork-url] — one line naming the exact fork and
+# upstream commits the current checkout was built from, for the build-info
+# stamp. Run from inside the repo (like the stamp itself). Always returns 0 and
+# never prints to stderr: every git call is guarded, so a non-fork, a shallow
+# or temp-dir wheel build, or a missing upstream ref yields an explicit marker
+# instead of tripping the ERR trap.
+#
+#   fork <url> sha <40-hex>[ dirty][ tag <tuning-tag>], upstream <url> ref <ref> base <40-hex> nearest <tag>+<N>
+#
+#  - fork sha is the full HEAD hash; " dirty" is added if tracked files differ
+#    from HEAD (the stamp would otherwise misidentify the build).
+#  - fork tag is GPU_TUNED_BUILD_INFO_TAG if the caller supplies it, else a
+#    tuning-* tag already pointing at HEAD. A release script usually tags only
+#    after the build, so the caller (or the release-tag helper) must pass it.
+#  - upstream ref is GPU_TUNED_UPSTREAM_REF (declare it per repo, e.g. in
+#    tuned/repo.env: upstream/master) or, failing that, upstream/HEAD if git
+#    has one. It is NOT guessed from main/master/develop: several upstreams
+#    release from a branch that main does not contain.
+#  - upstream base is merge-base(HEAD, ref): the upstream commit our tuned work
+#    sits on. nearest is the closest upstream tag at or before it and the
+#    distance from it; our own tuning-* tags are excluded.
+#  - Never fetches. upstream/* is as fresh as the last fetch; build-time
+#    freshness is gpu_tuned_check_main_current's job, not the stamp's.
+#  - Non-forks stamp "upstream none"; an undeclared ref stamps
+#    "ref undeclared"; an unresolvable one "base unknown".
+gpu_tuned_git_provenance() {
+    local fork_url="${1:-}" sha dirty="" tag up_url up_ref base nearest dist
+    if ! sha="$(git rev-parse HEAD 2>/dev/null)"; then
+        printf 'fork sha unknown, upstream unknown'
+        return 0
+    fi
+    if [ -z "${fork_url}" ]; then
+        fork_url="$(git remote get-url origin 2>/dev/null || true)"
+    fi
+    fork_url="$(gpu_tuned_public_repo_url "${fork_url}")"
+    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
+        dirty=" dirty"
+    fi
+    tag="${GPU_TUNED_BUILD_INFO_TAG:-}"
+    if [ -z "${tag}" ]; then
+        tag="$(git describe --exact-match --tags --match 'tuning-*' HEAD 2>/dev/null || true)"
+    fi
+    printf 'fork %s sha %s%s' "${fork_url:-unknown}" "${sha}" "${dirty}"
+    [ -z "${tag}" ] || printf ' tag %s' "${tag}"
+
+    if ! up_url="$(git remote get-url upstream 2>/dev/null)"; then
+        printf ', upstream none'
+        return 0
+    fi
+    up_url="$(gpu_tuned_public_repo_url "${up_url}")"
+    up_ref="${GPU_TUNED_UPSTREAM_REF:-}"
+    if [ -z "${up_ref}" ]; then
+        up_ref="$(git symbolic-ref -q --short refs/remotes/upstream/HEAD 2>/dev/null || true)"
+    fi
+    if [ -z "${up_ref}" ]; then
+        printf ', upstream %s ref undeclared' "${up_url}"
+        return 0
+    fi
+    if ! base="$(git merge-base HEAD "${up_ref}" 2>/dev/null)"; then
+        printf ', upstream %s ref %s base unknown' "${up_url}" "${up_ref}"
+        return 0
+    fi
+    nearest="$(git describe --tags --abbrev=0 --exclude 'tuning-*' "${base}" 2>/dev/null || true)"
+    if [ -n "${nearest}" ]; then
+        dist="$(git rev-list --count "refs/tags/${nearest}..${base}" 2>/dev/null || true)"
+        nearest="${nearest}+${dist:-?}"
+    else
+        nearest="none"
+    fi
+    printf ', upstream %s ref %s base %s nearest %s' "${up_url}" "${up_ref}" "${base}" "${nearest}"
+}
+
 # gpu_tuned_embed_build_info <so-or-bin-path> <variant> <package> <version>
 # [hw-label] [repo-url] [section-name] — embeds a greppable build-info
 # string into a custom ELF section on the given file, readable later via
@@ -233,9 +526,15 @@ gpu_tuned_verify_cccl_version() {
 # v26.12-gb10-cu134-g9d97792e"). Unset, the stamp is unchanged. An env var
 # rather than an 8th argument so the per-repo embed_build_info wrappers need
 # no change.
+#
+# The stamp also records the fork and upstream commits (see
+# gpu_tuned_git_provenance), placed before ", commit <short>" so anything
+# already parsing that field is unaffected. Env inputs, all optional:
+# GPU_TUNED_UPSTREAM_REF (the upstream ref to base on) and
+# GPU_TUNED_BUILD_INFO_TAG (the tuning tag this build will be released as).
 gpu_tuned_embed_build_info() {
     local target="$1" variant="$2" package="$3" version="$4" hw_label="${5:-${2}}" repo_url="${6:-}" section_override="${7:-}"
-    local section tmp git_sha
+    local section tmp git_sha provenance
     if [ -n "${section_override}" ]; then
         section="${section_override}"
         [[ "${section}" == .* ]] || section=".${section}"
@@ -243,10 +542,12 @@ gpu_tuned_embed_build_info() {
         section=".$(printf '%s' "${package}" | tr -c 'A-Za-z0-9' '_')_build_info"
     fi
     git_sha="$(git rev-parse --short HEAD 2>/dev/null)" || git_sha="unknown"
+    provenance="$(gpu_tuned_git_provenance "${repo_url}")"
     tmp="$(mktemp)"
     {
         printf '%s-%s build: %s v%s (%s)' "${package}" "${variant}" "${package}" "${version}" "${hw_label}"
         [ -n "${repo_url}" ] && printf ', %s' "${repo_url}"
+        printf ', %s' "${provenance}"
         printf ', commit %s' "${git_sha}"
         [ -n "${GPU_TUNED_BUILD_INFO_DEPS:-}" ] && printf ', deps %s' "${GPU_TUNED_BUILD_INFO_DEPS//$'\n'/ }"
         printf ', built %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -452,33 +753,55 @@ gpu_tuned_cuda_subdir() {
     fi
 }
 
-# gpu_tuned_out_dir <kind> <repo-root> <cuda-tag> [<variant>] — the
-# CUDA-version-specific output directory for <kind> in the raft/cuvs layout:
-#   build    -> <repo-root>/cpp/build/<cuda-tag>/<variant>
-#   dist     -> <repo-root>/dist/<cuda-tag>/<variant>   (variant may be "shared")
-#   releases -> <repo-root>/tuned/releases/<cuda-tag>   (variant not used)
-# Repos with a different layout (faiss) call gpu_tuned_cuda_subdir directly.
-# Fails on an unknown kind, or a missing variant for build/dist.
+# gpu_tuned_out_dir <kind> <repo-root> <cuda-tag> [<variant>] — an output directory in the
+# per-toolkit tree, tuned/build/<cuda-tag>/ (gitignored via build/), the layout raft and cuvs use
+# (changed 2026-10-12 from cpp/build/<cuda>/<variant> and dist/<cuda>/<variant>):
+#   build    -> <repo-root>/tuned/build/<cuda-tag>/cmake      the one fixed compile path per toolkit
+#   dist     -> <repo-root>/tuned/build/<cuda-tag>/dist       built wheels/tarballs
+#   dist shared -> <repo-root>/tuned/build/<cuda-tag>/dist-shared   a SIBLING of dist, never inside
+#                   it: wheel.sh clears dist before copying the shared wheels in from here
+#   releases -> <repo-root>/tuned/build/<cuda-tag>/releases   generated release inputs (checksums,
+#                   test logs); the tracked RELEASE_NOTES_*.md stay in tuned/releases/
+# There is no variant level: two variants never share a build tree (gpu_tuned_claim_toolkit_tree
+# refuses it). The fixed path is what lets ccache hit and keeps ninja's log for timings. <variant>
+# is accepted for source compatibility and only validated; "shared" selects dist-shared. Repos with
+# a different layout (faiss) call gpu_tuned_cuda_subdir directly. Fails on an unknown kind or a
+# malformed tag or variant.
 gpu_tuned_out_dir() {
-    local kind="$1" root="$2" cuda_tag="$3" variant="${4:-}"
+    local kind="$1" root="$2" cuda_tag="$3" variant="${4:-}" base
+    base="$(gpu_tuned_cuda_subdir "${root}/tuned/build" "${cuda_tag}" "${variant}")" || return 1
+    base="${base%/"${variant}"}"
     case "${kind}" in
-        build|dist)
-            if [[ -z "${variant}" ]]; then
-                echo "ERROR: gpu_tuned_out_dir: '${kind}' needs a variant (got '${variant}')." >&2
-                return 1
-            fi
-            if [[ "${kind}" == "build" ]]; then
-                gpu_tuned_cuda_subdir "${root}/cpp/build" "${cuda_tag}" "${variant}"
-            else
-                gpu_tuned_cuda_subdir "${root}/dist" "${cuda_tag}" "${variant}"
-            fi
+        build) echo "${base}/cmake" ;;
+        dist)
+            if [[ "${variant}" == shared ]]; then echo "${base}/dist-shared"; else echo "${base}/dist"; fi
             ;;
-        releases) gpu_tuned_cuda_subdir "${root}/tuned/releases" "${cuda_tag}" ;;
+        releases) echo "${base}/releases" ;;
         *)
             echo "ERROR: gpu_tuned_out_dir: unknown kind '${kind}' (expected build, dist or releases)." >&2
             return 1
             ;;
     esac
+}
+
+# gpu_tuned_claim_toolkit_tree <repo-root> <cuda-tag> <variant> — create tuned/build/<cuda-tag>/ and
+# record which variant owns it in .variant. With no variant level in the layout, a tree last used
+# by another variant would silently mix their objects; this refuses instead (a separate checkout,
+# or a different machine, is the way to build another variant). Idempotent for the same variant.
+gpu_tuned_claim_toolkit_tree() {
+    local root="$1" cuda_tag="$2" variant="$3" dir owner
+    [[ -n "${variant}" ]] || { echo "ERROR: gpu_tuned_claim_toolkit_tree: a variant is required." >&2; return 1; }
+    dir="$(gpu_tuned_cuda_subdir "${root}/tuned/build" "${cuda_tag}")" || return 1
+    mkdir -p "${dir}"
+    if [[ -f "${dir}/.variant" ]]; then
+        owner="$(cat "${dir}/.variant")"
+        if [[ "${owner}" != "${variant}" ]]; then
+            echo "ERROR: gpu_tuned_claim_toolkit_tree: ${dir} was built for variant '${owner}', not '${variant}'. Use a separate checkout for another variant." >&2
+            return 1
+        fi
+    else
+        printf '%s\n' "${variant}" > "${dir}/.variant"
+    fi
 }
 
 # gpu_tuned_wheel_version <wheel-path> <pkg-name-prefix> — extracts the
@@ -505,6 +828,217 @@ gpu_tuned_wheel_version() {
     echo "${version}"
 }
 
+# gpu_tuned_require_clean_tree — refuses (returns 1) unless the git checkout in
+# the current directory has no uncommitted changes to tracked files. Called by
+# gpu_tuned_publish_release, so a published build always matches the commit its
+# build-info stamp names (a dirty tree stamps " dirty"). Untracked files are
+# ignored: build output lands there and would make every build dirty. There is
+# deliberately no override; local test builds don't publish. Prints which tree
+# it checked, because a few release scripts do not cd to the repo root first.
+gpu_tuned_require_clean_tree() {
+    local top changes
+    if ! top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        echo "ERROR: gpu_tuned_require_clean_tree: $(pwd) is not inside a git checkout, so a clean tree cannot be shown. Run from the repo root." >&2
+        return 1
+    fi
+    changes="$(git status --porcelain --untracked-files=no 2>/dev/null || true)"
+    if [ -n "${changes}" ]; then
+        echo "ERROR: refusing to publish from a dirty tree: ${top}" >&2
+        echo "  tracked files differ from HEAD ($(git rev-parse --short HEAD 2>/dev/null || echo '?')), so the build would not match its stamped commit:" >&2
+        printf '%s\n' "${changes}" | head -10 | sed 's/^/    /' >&2
+        [ "$(printf '%s\n' "${changes}" | wc -l)" -le 10 ] || echo "    ..." >&2
+        echo "  Commit or stash these, rebuild, then publish." >&2
+        return 1
+    fi
+    echo "OK: clean tracked tree at ${top} ($(git rev-parse --short HEAD 2>/dev/null || echo '?'))"
+}
+
+# gpu_tuned_check_wheel_label <wheel-path> -- refuses (returns 1) unless the wheel's file name
+# carries a date-form local version: <public>+[<scm>.]<variant>.cu<cuda>.<YYYYMMDD>[.<seq>] with a
+# real calendar date and no ".0" sequence (docs/VERSIONING.md). Reads the file NAME only, so it
+# runs before anything is uploaded. The same rule as tools/wheel_version_audit.py's DATED class
+# (tests/test_wheel_version_audit.py cross-checks the two). GPU_TUNED_ALLOW_COUNTER_LABEL=1 also
+# accepts the retired <variant>.cu<cuda>.tuning.<N> counter, for a repo not yet migrated; it says
+# so loudly. Anything else (no label, platform-only +cu133, legacy tuning.vN) is refused.
+gpu_tuned_check_wheel_label() {
+    local name version local_part date
+    name="$(basename "${1:-}")"
+    if [[ ! "${name}" =~ ^[A-Za-z0-9_.]+-([^-]+)-.+\.whl$ ]]; then
+        echo "ERROR: gpu_tuned_check_wheel_label: '${name}' is not a wheel file name." >&2
+        return 1
+    fi
+    version="${BASH_REMATCH[1]}"
+    if [[ "${version}" != *+* ]]; then
+        echo "ERROR: gpu_tuned_check_wheel_label: ${name} has no local version label (+<variant>.cu<cuda>.<YYYYMMDD>); refusing to publish an unlabelled build." >&2
+        return 1
+    fi
+    local_part="${version#*+}"
+    if [[ "${local_part}" =~ ^([a-z][a-z0-9]*\.)*[a-z][a-z0-9]*\.cu[0-9]+\.([1-9][0-9]{7})(\.[1-9][0-9]*)?$ ]]; then
+        date="${BASH_REMATCH[2]}"
+        if gpu_tuned_valid_date "${date}"; then return 0; fi
+        echo "ERROR: gpu_tuned_check_wheel_label: ${name} carries ${date}, which is not a real calendar date." >&2
+        return 1
+    fi
+    if [[ "${GPU_TUNED_ALLOW_COUNTER_LABEL:-}" == 1 && "${local_part}" =~ ^([a-z][a-z0-9]*\.)*[a-z][a-z0-9]*\.cu[0-9]+\.tuning\.(0|[1-9][0-9]*)$ ]]; then
+        echo "WARNING: gpu_tuned_check_wheel_label: ${name} uses the retired tuning.N counter label (GPU_TUNED_ALLOW_COUNTER_LABEL=1); migrate this repo to the date form." >&2
+        return 0
+    fi
+    echo "ERROR: gpu_tuned_check_wheel_label: ${name} local version '${local_part}' is not <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (docs/VERSIONING.md)." >&2
+    return 1
+}
+
+# gpu_tuned_smoke_wheel <wheel> <dist-name> <import-name> [<stamp-section> <stamp-library>]
+# -- install a built wheel into a CLEAN throwaway venv and load it once, before anything is
+# published. Nothing from the build tree, the build venv or the repo is on the path: the probe
+# runs with `python -I` from an empty directory, so it sees only what a user of the wheel would.
+# Checks, in order, each failing loudly:
+#   1. the file name carries a date-form label (gpu_tuned_check_wheel_label);
+#   2. the wheel's python tag fits the interpreter that will load it;
+#   3. it installs, and the venv holds exactly ONE <dist-name> distribution at exactly the
+#      wheel's version (a stock wheel pulled in as a dependency would show up here);
+#   4. `import <import-name>` works, its __version__ is the wheel's version, and it is loaded from
+#      inside the venv;
+#   5. if <stamp-section> and <stamp-library> are given, the build-info stamp in the installed
+#      <stamp-library> names that version (gpu_tuned_verify_build_info);
+#   6. for import-name torch: CUDA is usable, torch.version.cuda is the release the label's cu<NNN>
+#      names, a small GPU matmul is correct, and (when GPU_TUNED_SMOKE_EXPECT_CAP=<major.minor> is
+#      set) the device capability is that one.
+# Needs network for the wheel's pure-python dependencies unless GPU_TUNED_SMOKE_FIND_LINKS=<dir>
+# is set (then `--no-index --find-links`). GPU_TUNED_SMOKE_SKIP_LABEL=1 skips step 1 and says so,
+# for a wheel built before the date form; the skip is printed, never counted as a pass.
+# GPU_TUNED_SMOKE_KEEP=1 keeps the venv and prints its path.
+gpu_tuned_smoke_wheel() {
+    local wheel="${1:-}" dist="${2:-}" imp="${3:-}" section="${4:-}" stamp_lib="${5:-}"
+    local fn="gpu_tuned_smoke_wheel"
+    if [[ -z "${wheel}" || -z "${dist}" || -z "${imp}" ]]; then
+        echo "ERROR: ${fn}: usage: ${fn} <wheel> <dist-name> <import-name> [<stamp-section> <stamp-library>]" >&2
+        return 1
+    fi
+    [[ -f "${wheel}" ]] || { echo "ERROR: ${fn}: ${wheel} is not a file." >&2; return 1; }
+    local base version local_part
+    base="$(basename "${wheel}")"
+    version="$(gpu_tuned_wheel_version "${wheel}" "${dist//-/_}")" || return 1
+
+    if [[ "${GPU_TUNED_SMOKE_SKIP_LABEL:-}" == 1 ]]; then
+        echo "SKIP: ${fn}: version label check (GPU_TUNED_SMOKE_SKIP_LABEL=1)"
+    else
+        gpu_tuned_check_wheel_label "${wheel}" || return 1
+    fi
+
+    local pytag interp_tag
+    pytag="$(printf '%s' "${base}" | sed -E 's/^[^-]+-[^-]+-([^-]+)-.*/\1/')"
+    interp_tag="$(python3 -c 'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")')" || return 1
+    if [[ "${pytag}" == cp* && "${pytag}" != "${interp_tag}" ]]; then
+        echo "ERROR: ${fn}: ${base} is built for ${pytag} but python3 is ${interp_tag}; the smoke test would load nothing." >&2
+        return 1
+    fi
+
+    local venv work rc=0
+    work="$(mktemp -d)"
+    venv="${work}/venv"
+    python3 -m venv "${venv}" || { rm -rf "${work}"; return 1; }
+    local pip_args=(install --quiet)
+    if [[ -n "${GPU_TUNED_SMOKE_FIND_LINKS:-}" ]]; then
+        pip_args+=(--no-index --find-links "${GPU_TUNED_SMOKE_FIND_LINKS}" --find-links "$(dirname "${wheel}")")
+    fi
+    # GPU_TUNED_SMOKE_PIN="torch==2.15.0+gb10.cu134.20261012" (space-separated requirements) pins
+    # dependencies the wheel only names loosely (torch>=...), and GPU_TUNED_SMOKE_EXTRA_LINKS=<dir>
+    # adds a directory holding those exact wheels while the index stays available for everything
+    # else. Without them a loose torch requirement resolves to stock torch from PyPI and the smoke
+    # test would exercise a pairing nobody ships.
+    local pins=()
+    if [[ -n "${GPU_TUNED_SMOKE_PIN:-}" ]]; then
+        read -r -a pins <<< "${GPU_TUNED_SMOKE_PIN}"
+    fi
+    [[ -z "${GPU_TUNED_SMOKE_EXTRA_LINKS:-}" ]] || pip_args+=(--find-links "${GPU_TUNED_SMOKE_EXTRA_LINKS}")
+    echo "smoke: installing ${base} into a clean venv${pins[*]:+ (pinned: ${pins[*]})}"
+    if ! env -u PYTHONPATH -u PYTHONHOME "${venv}/bin/python" -m pip "${pip_args[@]}" "${wheel}" "${pins[@]}" >"${work}/pip.log" 2>&1; then
+        echo "ERROR: ${fn}: pip could not install ${base}:" >&2
+        tail -15 "${work}/pip.log" >&2
+        rm -rf "${work}"
+        return 1
+    fi
+
+    mkdir "${work}/empty"
+    local probe="${work}/probe.out"
+    ( cd "${work}/empty" && env -u PYTHONPATH -u PYTHONHOME "${venv}/bin/python" -I - "${dist}" "${imp}" >"${probe}" 2>"${work}/probe.err" <<'PY'
+import importlib
+import importlib.metadata as md
+import re
+import sys
+
+dist, imp = sys.argv[1:3]
+norm = lambda s: re.sub(r"[-_.]+", "-", s).lower()
+print("dists=" + ",".join(sorted(d.version for d in md.distributions() if norm(d.metadata["Name"] or "") == norm(dist))))
+mod = importlib.import_module(imp)
+print("module_version=" + str(getattr(mod, "__version__", "")))
+print("module_file=" + str(getattr(mod, "__file__", "")))
+if imp == "torch":
+    cuda = mod.cuda
+    print("cuda_available=" + str(cuda.is_available()))
+    print("cuda_version=" + str(mod.version.cuda))
+    if cuda.is_available():
+        print("capability=%d.%d" % cuda.get_device_capability(0))
+        a = mod.arange(16, dtype=mod.float32, device="cuda").reshape(4, 4)
+        print("matmul_ok=" + str(bool(mod.allclose((a @ a).cpu(), a.cpu() @ a.cpu()))))
+PY
+    ) || rc=$?
+    if [[ ${rc} -ne 0 ]]; then
+        echo "ERROR: ${fn}: loading ${imp} from the clean venv failed (exit ${rc}):" >&2
+        tail -15 "${work}/probe.err" >&2
+        [[ "${GPU_TUNED_SMOKE_KEEP:-}" == 1 ]] && echo "venv kept: ${venv}" >&2 || rm -rf "${work}"
+        return 1
+    fi
+
+    local key val dists="" modver="" modfile="" cuda_avail="" cuda_ver="" cap="" mm=""
+    while IFS== read -r key val; do
+        case "${key}" in
+            dists) dists="${val}" ;; module_version) modver="${val}" ;; module_file) modfile="${val}" ;;
+            cuda_available) cuda_avail="${val}" ;; cuda_version) cuda_ver="${val}" ;;
+            capability) cap="${val}" ;; matmul_ok) mm="${val}" ;;
+        esac
+    done <"${probe}"
+
+    local problems=()
+    [[ "${dists}" == "${version}" ]] || problems+=("installed ${dist} versions are '${dists}', expected exactly '${version}'")
+    # A package whose __version__ is a static string (no local label) is checked against the base
+    # version only, with GPU_TUNED_SMOKE_MODULE_VERSION=base; the installed distribution's version
+    # (checked above) still has to match the full label exactly.
+    local want_modver="${version}"
+    [[ "${GPU_TUNED_SMOKE_MODULE_VERSION:-}" == base ]] && want_modver="${version%%+*}"
+    [[ "${modver}" == "${want_modver}" ]] || problems+=("${imp}.__version__ is '${modver}', expected '${want_modver}'")
+    [[ "${modfile}" == "${venv}"/* ]] || problems+=("${imp} loaded from '${modfile}', not from inside the clean venv")
+    if [[ -n "${section}" && -n "${stamp_lib}" ]]; then
+        local lib
+        lib="$(find "${venv}" -name "${stamp_lib}" -not -type l 2>/dev/null | head -1)"
+        if [[ -z "${lib}" ]]; then
+            problems+=("stamp library ${stamp_lib} not found in the installed wheel")
+        elif ! gpu_tuned_verify_build_info "${lib}" "${dist}" "${version}" "${section}" >/dev/null 2>"${work}/stamp.err"; then
+            problems+=("build-info stamp in ${stamp_lib}: $(tr '\n' ' ' <"${work}/stamp.err")")
+        fi
+    fi
+    if [[ "${imp}" == torch ]]; then
+        local label_cuda
+        label_cuda="$(printf '%s' "${version}" | sed -nE 's/.*\.cu([0-9]+)\..*/\1/p')"
+        [[ "${cuda_avail}" == True ]] || problems+=("torch.cuda.is_available() is '${cuda_avail}'")
+        if [[ -n "${label_cuda}" ]]; then
+            [[ "${cuda_ver/./}" == "${label_cuda}" ]] || problems+=("torch.version.cuda is '${cuda_ver}' but the label says cu${label_cuda}")
+        fi
+        [[ "${mm}" == True ]] || problems+=("GPU matmul check returned '${mm}'")
+        if [[ -n "${GPU_TUNED_SMOKE_EXPECT_CAP:-}" && "${cap}" != "${GPU_TUNED_SMOKE_EXPECT_CAP}" ]]; then
+            problems+=("device capability is '${cap}', expected ${GPU_TUNED_SMOKE_EXPECT_CAP}")
+        fi
+    fi
+
+    if [[ "${GPU_TUNED_SMOKE_KEEP:-}" == 1 ]]; then echo "venv kept: ${venv}"; else rm -rf "${work}"; fi
+    if [[ ${#problems[@]} -gt 0 ]]; then
+        local p
+        for p in "${problems[@]}"; do echo "ERROR: ${fn}: ${p}" >&2; done
+        return 1
+    fi
+    echo "OK: ${fn}: ${base} installs and loads cleanly (${imp} ${modver}${cap:+, device ${cap}, cuda ${cuda_ver}})"
+}
+
 # gpu_tuned_publish_release <owner/repo> <tag> <title> <notes-or-@notes-file>
 # [asset-spec ...] — publish a GitHub release via `gh release create`,
 # always targeting the "tuned-builds" branch (every consumer in this fleet
@@ -519,12 +1053,23 @@ gpu_tuned_wheel_version() {
 # nothing attached is always a caller mistake in this fleet (forgot to
 # build/package first), not a legitimate case.
 #
+# Refuses to publish from a dirty tree (gpu_tuned_require_clean_tree), run
+# against the current directory's checkout, before anything reaches `gh`.
+#
 # Consolidates a call independently hand-written 12 times across 10 repos
 # (raft alone 3x) -- see
 # ~/.claude/design/tuned-common-consolidation-candidates.md finding #1.
 gpu_tuned_publish_release() {
     local repo="$1" tag="$2" title="$3" notes="$4"
     shift 4
+    gpu_tuned_require_clean_tree || return 1
+    local asset path
+    for asset in "$@"; do
+        path="${asset%%#*}"
+        if [[ "${path}" == *.whl ]]; then
+            gpu_tuned_check_wheel_label "${path}" || return 1
+        fi
+    done
     if [[ $# -eq 0 ]]; then
         echo "ERROR: gpu_tuned_publish_release: no assets given (at least one is required)." >&2
         return 1
@@ -575,8 +1120,11 @@ gpu_tuned_verify_venv() {
     for egg_dir in "${repo_root}"/*.egg-info; do
         [[ -d "${egg_dir}" ]] || continue
         pkg_name="$(basename "${egg_dir}" .egg-info)"
-        egg_version="$(sed -n 's/^Version: //p' "${egg_dir}/PKG-INFO" 2>/dev/null | head -1)"
-        installed_version="$("${venv_dir}/bin/pip" show "${pkg_name}" 2>/dev/null | sed -n 's/^Version: //p')"
+        # `|| true`: pip show exits 1 for a package not installed yet (a fresh venv), and a missing
+        # PKG-INFO fails sed; both mean "nothing to compare" (empty is handled below), but under
+        # set -e + pipefail the failed assignment would abort the caller instead.
+        egg_version="$(sed -n 's/^Version: //p' "${egg_dir}/PKG-INFO" 2>/dev/null | head -1 || true)"
+        installed_version="$("${venv_dir}/bin/pip" show "${pkg_name}" 2>/dev/null | sed -n 's/^Version: //p' || true)"
         if [[ -n "${egg_version}" && -n "${installed_version}" && "${egg_version}" != "${installed_version}" ]]; then
             echo "ERROR: gpu_tuned_verify_venv: ${egg_dir}/PKG-INFO's Version (${egg_version}) does not match ${venv_dir}'s installed ${pkg_name} (${installed_version}) -- stale metadata, likely left over from a different/deleted venv. Delete it: rm -rf ${egg_dir}" >&2
             return 1
@@ -590,7 +1138,7 @@ gpu_tuned_verify_venv() {
             echo "ERROR: gpu_tuned_verify_venv: ${cmake_cache}'s CMAKE_HOME_DIRECTORY (${cached_home}) does not match this repo (${repo_root}) -- this build/ dir looks copied from another repo. Delete it: rm -rf ${repo_root}/build" >&2
             return 1
         fi
-    done < <(find "${repo_root}/build" -name 'CMakeCache.txt' 2>/dev/null)
+    done < <(find "${repo_root}/build" -name 'CMakeCache.txt' 2>/dev/null || true)
 
     return 0
 }
@@ -689,6 +1237,400 @@ gpu_tuned_local_version() {
 # `set -o pipefail`, where a no-match grep would otherwise abort them.
 gpu_tuned_tuning_label() {
     printf '%s' "${1:-}" | grep -oE 'tuning\.[0-9]+' | head -1 || true
+}
+
+# gpu_tuned_valid_date <YYYYMMDD> -- succeeds only for an 8-digit date that is a
+# real calendar day and does not start with 0 (a leading zero is stripped by
+# PEP 440 normalization, so it would not match its own wheel filename). The date
+# is round-tripped through `date -u -d` and compared, not trusted on exit code.
+gpu_tuned_valid_date() {
+    local d="${1:-}"
+    [[ "${d}" =~ ^[1-9][0-9]{7}$ ]] || return 1
+    [ "$(date -u -d "${d:0:4}-${d:4:2}-${d:6:2}" +%Y%m%d 2>/dev/null || true)" = "${d}" ]
+}
+
+# gpu_tuned_local_version_dated <variant> <cuda-compact> <YYYYMMDD> [<seq>] --
+# prints the date-form PEP 440 local label: <variant>.cu<cuda>.<YYYYMMDD>[.<seq>]
+# e.g. "0.7.0+gb10.cu134.20261010" and, for a second build the same day,
+# "0.7.0+gb10.cu134.20261010.1". Replaces "<variant>.cu<cuda>.tuning.<N>" (user
+# decision 2026-10-11, docs/VERSIONING.md); gpu_tuned_local_version is kept for
+# consumers that have not migrated.
+#
+# <seq> is the build's sequence within its date: 0 (the default) is the first
+# build and is OMITTED from the label; 1, 2, ... are appended. It must be a
+# canonical integer (no leading zeros). A ".0" label is never produced because
+# PEP 440 sorts "<date>.0" above "<date>", which would make it a second spelling
+# of the first build. The native release tag renders the same integer in full
+# (v0.<date>.<seq>, so ".0" there); both come from one sequence value.
+gpu_tuned_local_version_dated() {
+    local variant="${1:-}" cuda="${2:-}" date="${3:-}" seq="${4:-0}"
+    if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ ]]; then
+        echo "ERROR: gpu_tuned_local_version_dated: variant '${variant}' must be lowercase alphanumeric (e.g. gb10)." >&2
+        return 1
+    fi
+    if [[ ! "${cuda}" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_local_version_dated: cuda-compact '${cuda}' must be digits only (e.g. 134 for CUDA 13.4)." >&2
+        return 1
+    fi
+    if ! gpu_tuned_valid_date "${date}"; then
+        echo "ERROR: gpu_tuned_local_version_dated: date '${date}' must be a real calendar date as YYYYMMDD, not starting with 0." >&2
+        return 1
+    fi
+    if [[ ! "${seq}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+        echo "ERROR: gpu_tuned_local_version_dated: sequence '${seq}' must be a canonical integer (0 = first build of the day, no leading zeros)." >&2
+        return 1
+    fi
+    if [ "${seq}" = "0" ]; then
+        echo "${variant}.cu${cuda}.${date}"
+    else
+        echo "${variant}.cu${cuda}.${date}.${seq}"
+    fi
+}
+
+# gpu_tuned_date_label <version-string> -- prints the "<YYYYMMDD>[.<seq>]" label
+# at the END of a date-form tuned version (e.g. "0.7.0+gb10.cu134.20261010.1" ->
+# "20261010.1"), or nothing (still exit 0) if the version does not end that way.
+# Anchored on the "<variant>.cu<cuda>." that precedes it, because without the old
+# "tuning" marker a bare digit match would also hit a CUDA segment or setuptools_scm's
+# g<sha>. A ".0" sequence and an impossible calendar date are not labels. Never
+# fails (callers run under pipefail).
+gpu_tuned_date_label() {
+    local v="${1:-}" label=""
+    if [[ "${v}" =~ \.cu[0-9]+\.([1-9][0-9]{7}(\.[1-9][0-9]*)?)$ ]]; then
+        label="${BASH_REMATCH[1]}"
+        gpu_tuned_valid_date "${label:0:8}" || label=""
+    elif [[ "${v}" =~ ^v0\.([1-9][0-9]{7})\.(0|[1-9][0-9]*)-[a-z][a-z0-9]*-cu[0-9]+$ ]]; then
+        # native release tag v0.<date>.<seq>-<variant>-cu<cuda>; seq 0 is the bare date
+        label="${BASH_REMATCH[1]}"
+        local seq="${BASH_REMATCH[2]}"   # saved first: gpu_tuned_valid_date's own regex overwrites BASH_REMATCH
+        gpu_tuned_valid_date "${label}" || label=""
+        [ -z "${label}" ] || [ "${seq}" = 0 ] || label="${label}.${seq}"
+    fi
+    [ -z "${label}" ] || printf '%s\n' "${label}"
+    return 0
+}
+
+# gpu_tuned_native_tag <variant> <cuda-tag> <label> -- the release tag of a native (non-wheel)
+# build: v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, e.g. v0.20261011.0-gb10-cu134. <label> is
+# "<YYYYMMDD>[.<seq>]" from gpu_tuned_allocate_date_label; the sequence is always written here
+# (0 for a bare date), where a wheel label omits it. gpu_tuned_date_label reads the tag back.
+gpu_tuned_native_tag() {
+    local variant="${1:-}" cuda_tag="${2:-}" label="${3:-}" date seq
+    date="${label%%.*}"
+    seq="$(gpu_tuned_label_seq "${label}")"
+    if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ ]] || [[ ! "${cuda_tag}" =~ ^cu[0-9]+$ ]] \
+        || ! gpu_tuned_valid_date "${date}" || [[ ! "${seq}" =~ ^(0|[1-9][0-9]*)$ ]] \
+        || [[ "${label}" != "${date}" && ( "${seq}" = 0 || "${label}" != "${date}.${seq}" ) ]]; then
+        echo "ERROR: gpu_tuned_native_tag: need <variant> <cuNNN> <YYYYMMDD[.seq]>, got '${variant}' '${cuda_tag}' '${label}'." >&2
+        return 1
+    fi
+    printf 'v0.%s.%s-%s-%s\n' "${date}" "${seq}" "${variant}" "${cuda_tag}"
+}
+
+# gpu_tuned_nvcc_compact [cuda-home] -- the CUDA release that <cuda-home>/bin/nvcc reports,
+# without the dot ("134" for 13.4, "1310" for 13.10), for the <cuda> part of a wheel label.
+# <cuda-home> defaults to $CUDA_HOME. Reads the nvcc that will really compile, not a directory
+# name, so the label cannot disagree with the build; a wheel script that also lets setup.py
+# read nvcc (vllm) gets the same answer in both places. Not truncated: vllm's old setup.py cut
+# it to three characters, which would turn 13.10 into "131". Fails loudly if nvcc is absent
+# or its output cannot be read.
+gpu_tuned_nvcc_compact() {
+    local home="${1:-${CUDA_HOME:-}}" out rel
+    if [ -z "${home}" ]; then
+        echo "ERROR: gpu_tuned_nvcc_compact: no CUDA home given and CUDA_HOME is not set." >&2
+        return 1
+    fi
+    if [ ! -x "${home}/bin/nvcc" ]; then
+        echo "ERROR: gpu_tuned_nvcc_compact: ${home}/bin/nvcc is not an executable." >&2
+        return 1
+    fi
+    out="$("${home}/bin/nvcc" --version 2>/dev/null || true)"
+    rel="$(printf '%s\n' "${out}" | grep -oE 'release [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true)"
+    if [[ ! "${rel}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_nvcc_compact: cannot read a 'release X.Y' from ${home}/bin/nvcc --version." >&2
+        return 1
+    fi
+    printf '%s\n' "${rel/./}"
+}
+
+# gpu_tuned_head_date [dir] -- prints the UTC committer date of HEAD as YYYYMMDD: the
+# date a build of this commit is labelled with, so rebuilding the same commit reproduces
+# its label. Read with TZ=UTC and --date=format-local, NOT --date=format: the latter uses
+# the commit's own recorded timezone, which is a day off whenever a commit was made late in
+# the evening west of UTC (23:30-07:00 is the next day in UTC). Not the wall clock, and the
+# environment's TZ cannot change it.
+gpu_tuned_head_date() {
+    local dir="${1:-.}" d
+    d="$(TZ=UTC git -C "${dir}" log -1 --format=%cd --date=format-local:%Y%m%d HEAD 2>/dev/null || true)"
+    if ! gpu_tuned_valid_date "${d}"; then
+        echo "ERROR: gpu_tuned_head_date: cannot read a valid HEAD commit date in ${dir} (got '${d}')." >&2
+        return 1
+    fi
+    printf '%s\n' "${d}"
+}
+
+# gpu_tuned_taken_date_labels [dir] [remote] -- one "<YYYYMMDD>[.<seq>]" per line for every
+# date label already carried by a release tag in <remote> (default origin) or locally.
+# Tags are read with `git ls-remote`, not `gh release list` (which pages at 30 and needs auth);
+# a GitHub release is a git tag, so it is listed. Fails if the remote cannot be read: a silent
+# fallback to local tags could hand out a sequence that is already published.
+gpu_tuned_taken_date_labels() {
+    local dir="${1:-.}" remote="${2:-origin}" remote_tags local_tags t
+    if ! remote_tags="$(git -C "${dir}" ls-remote --tags "${remote}" 2>/dev/null)"; then
+        echo "ERROR: gpu_tuned_taken_date_labels: cannot read tags from remote '${remote}' in ${dir}, so an unused sequence cannot be chosen. Check the network, or choose it yourself with GPU_TUNED_LABEL_SEQ=<n>." >&2
+        return 1
+    fi
+    local_tags="$(git -C "${dir}" tag --list)"
+    {
+        printf '%s\n' "${remote_tags}" | awk '{print $2}' | sed 's#^refs/tags/##; s#\^{}$##'
+        printf '%s\n' "${local_tags}"
+    } | sort -u | while IFS= read -r t; do gpu_tuned_date_label "${t}"; done | sort -u
+}
+
+# gpu_tuned_next_seq <YYYYMMDD> -- reads the taken labels on stdin and prints the LOWEST
+# sequence (0, 1, 2, ...) whose label is not taken: 0 is the bare date, n is "<date>.<n>".
+# Lowest-unused, not highest-plus-one, so a gap is filled and the answer does not depend on
+# order. The sequence is per date across the repo (a second build that day gets .1 even for a
+# different CUDA tag), which keeps one integer per build date.
+gpu_tuned_next_seq() {
+    local date="${1:-}" taken label n=0
+    if ! gpu_tuned_valid_date "${date}"; then
+        echo "ERROR: gpu_tuned_next_seq: '${date}' is not a valid YYYYMMDD date." >&2
+        return 1
+    fi
+    taken="$(cat)"
+    while :; do
+        if [ "${n}" = 0 ]; then label="${date}"; else label="${date}.${n}"; fi
+        grep -qxF -- "${label}" <<< "${taken}" || break
+        n=$((n + 1))
+    done
+    printf '%s\n' "${n}"
+}
+
+# gpu_tuned_label_seq <label> -- the sequence integer of a "<YYYYMMDD>[.<seq>]" label
+# (0 for a bare date). One integer renders as the wheel label (0 omitted) and, later, as the
+# native tag v0.<date>.<seq> (0 written).
+gpu_tuned_label_seq() {
+    local label="${1:-}"
+    if [[ "${label}" == *.* ]]; then printf '%s\n' "${label#*.}"; else printf '0\n'; fi
+}
+
+# gpu_tuned_allocate_date_label [dir] [remote] -- prints the label for a build of HEAD:
+# "<YYYYMMDD>" for the first build of that UTC date, "<YYYYMMDD>.<n>" after. The date is
+# gpu_tuned_head_date; the sequence is the lowest unused one among the tags in <remote>.
+# GPU_TUNED_LABEL_SEQ=<n> skips the lookup and uses n (a canonical integer): for dev builds
+# that will never be published (seq 0, no network) and for an offline override. Fails loudly,
+# never guesses, if the remote cannot be read and no override is given.
+gpu_tuned_allocate_date_label() {
+    local dir="${1:-.}" remote="${2:-origin}" date seq taken
+    date="$(gpu_tuned_head_date "${dir}")" || return 1
+    if [ -n "${GPU_TUNED_LABEL_SEQ:-}" ]; then
+        if [[ ! "${GPU_TUNED_LABEL_SEQ}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "ERROR: gpu_tuned_allocate_date_label: GPU_TUNED_LABEL_SEQ='${GPU_TUNED_LABEL_SEQ}' must be a canonical integer (0 = first build of the day, no leading zeros)." >&2
+            return 1
+        fi
+        seq="${GPU_TUNED_LABEL_SEQ}"
+    else
+        taken="$(gpu_tuned_taken_date_labels "${dir}" "${remote}")" || return 1
+        seq="$(printf '%s\n' "${taken}" | gpu_tuned_next_seq "${date}")" || return 1
+    fi
+    if [ "${seq}" = 0 ]; then printf '%s\n' "${date}"; else printf '%s.%s\n' "${date}" "${seq}"; fi
+}
+
+# gpu_tuned_build_local_version <variant> [dir] [remote] -- the complete tuned local-version
+# suffix for a build of HEAD: <variant>.cu<cuda>.<YYYYMMDD>[.<seq>], e.g. gb10.cu134.20261011.
+# The one place a wheel script gets its label: <cuda> from the nvcc that will compile
+# (gpu_tuned_nvcc_compact, needs CUDA_HOME), date and sequence from gpu_tuned_allocate_date_label
+# (which reads <remote>'s tags; GPU_TUNED_LABEL_SEQ=<n> skips that, e.g. =0 for a dev build that
+# is never published), assembled by gpu_tuned_local_version_dated. Fails loudly at any step.
+gpu_tuned_build_local_version() {
+    local variant="${1:-}" dir="${2:-.}" remote="${3:-origin}" cuda label
+    cuda="$(gpu_tuned_nvcc_compact)" || return 1
+    label="$(gpu_tuned_allocate_date_label "${dir}" "${remote}")" || return 1
+    gpu_tuned_local_version_dated "${variant}" "${cuda}" "${label%%.*}" "$(gpu_tuned_label_seq "${label}")"
+}
+
+# gpu_tuned_ninja_timing <ninja-log> <offset-bytes> <out-tsv> [<strip-prefix>] -- per-target build
+# timings from ninja's own log, for builds that run CMake+Ninja (pytorch, vllm, flash-attention...).
+# Take the log's size (wc -c) BEFORE the build and pass it as <offset-bytes>: ninja appends to the
+# log across runs, so only the lines after the offset belong to this build. Writes one line per
+# target built in this run to <out-tsv>, in the same shape tuned/build.sh in zbrad/nccl writes:
+#   <seconds>\t<kind>\t<target>\t0       kind = nvcc (.cu.o), cxx (.cc/.cpp/.c .o), link (.so/.a), other
+# and prints "Timing: <n> units, wall <s>s, summed unit time <s>s" plus the 10 slowest. Ninja records
+# a target once per run, so a target rebuilt twice in one run cannot occur; "wall" is the span from
+# the first start to the last end in the log. Fails (and writes nothing) if the log is missing, is
+# shorter than the offset, or holds no new targets (a no-op build): say so, never report zeros.
+gpu_tuned_ninja_timing() {
+    local log="${1:-}" offset="${2:-}" out="${3:-}" strip="${4:-}" size
+    if [[ -z "${log}" || -z "${out}" || ! "${offset}" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_ninja_timing: usage: <ninja-log> <offset-bytes> <out-tsv> [<strip-prefix>]" >&2
+        return 1
+    fi
+    [[ -f "${log}" ]] || { echo "ERROR: gpu_tuned_ninja_timing: no ninja log at ${log}" >&2; return 1; }
+    size="$(wc -c < "${log}")"
+    if [[ "${size}" -lt "${offset}" ]]; then
+        echo "ERROR: gpu_tuned_ninja_timing: ${log} is smaller (${size}) than the recorded offset (${offset}); it was replaced during the build." >&2
+        return 1
+    fi
+    tail -c +"$((offset + 1))" "${log}" | awk -F'\t' -v strip="${strip}" '
+        /^#/ || NF < 4 { next }
+        {
+            s = $1 + 0; e = $2 + 0; name = $4
+            if (strip != "" && index(name, strip) == 1) name = substr(name, length(strip) + 1)
+            kind = "other"
+            if (name ~ /\.cu\.o$/) kind = "nvcc"
+            else if (name ~ /\.(cc|cpp|cxx|c)\.o$/) kind = "cxx"
+            else if (name ~ /\.(so|a)(\.[0-9.]+)?$/) kind = "link"
+            printf "%.1f\t%s\t%s\t0\n", (e - s) / 1000, kind, name
+        }' > "${out}.tmp"
+    if [[ ! -s "${out}.tmp" ]]; then
+        rm -f "${out}.tmp"
+        echo "ERROR: gpu_tuned_ninja_timing: no targets were built after offset ${offset} in ${log} (a no-op build, or the wrong log)." >&2
+        return 1
+    fi
+    mv "${out}.tmp" "${out}"
+    tail -c +"$((offset + 1))" "${log}" | awk -F'\t' '
+        /^#/ || NF < 4 { next }
+        { n++; sum += ($2 - $1) / 1000; if (min == "" || $1 < min) min = $1; if ($2 > max) max = $2 }
+        END { printf "Timing: %d units, wall %.0fs, summed unit time %.0fs\n", n, (max - min) / 1000, sum }'
+    echo "Slowest units:"
+    sort -t$'\t' -k1,1 -rn "${out}" | head -10 | awk -F'\t' '{ printf "  %7.1fs  %-6s %s\n", $1, $2, $3 }'
+}
+
+# ---- unique shared-object identities -------------------------------------------------
+#
+# Why: the dynamic linker matches a needed library by its SONAME. A tuned package that ships
+# libggml.so.0 shares that identity with a stock llama.cpp, so (verified with toy libraries in
+# tests/test_common.sh) a stock binary can silently bind OUR library depending on directory
+# order, our binary can bind THEIRS when LD_LIBRARY_PATH points there (RUNPATH loses to it), and
+# installing both into one directory makes the second overwrite the first. A renamed file with a
+# renamed SONAME and rewritten DT_NEEDED is immune to all three. patchelf does it at package time;
+# no upstream-tracked build file changes.
+
+# The mark inserted before ".so". One constant, so changing the convention is one edit.
+GPU_TUNED_SO_MARK="-tuned"
+
+# gpu_tuned_tuned_so_name <so-file-name> -- prints the tuned form of a shared-object file name:
+# libggml.so.0.23.0 -> libggml-tuned.so.0.23.0, libllama-server-impl.so -> libllama-server-impl-tuned.so.
+# Idempotent (an already-marked name is unchanged). Fails on a name that is not lib*.so[.N...].
+gpu_tuned_tuned_so_name() {
+    local n="${1:-}"
+    if [[ ! "${n}" =~ ^(lib.+)\.so((\.[0-9]+)*)$ ]]; then
+        echo "ERROR: gpu_tuned_tuned_so_name: '${n}' is not a lib*.so[.N...] name." >&2
+        return 1
+    fi
+    if [[ "${BASH_REMATCH[1]}" == *"${GPU_TUNED_SO_MARK}" ]]; then
+        printf '%s\n' "${n}"
+    else
+        printf '%s\n' "${BASH_REMATCH[1]}${GPU_TUNED_SO_MARK}.so${BASH_REMATCH[2]}"
+    fi
+}
+
+# gpu_tuned_rename_sonames <stage-dir> <manifest> [keep-regex] -- give the shared objects that
+# THIS build produced a unique identity. <manifest> lists, one per line, the file names in
+# <stage-dir> that are our own build output (select by provenance, never by name pattern: a
+# pattern misses whatever upstream adds next). Each is renamed to its tuned name and gets a
+# tuned SONAME; then the DT_NEEDED of every ELF in <stage-dir> that names a renamed file is
+# rewritten, executables included. Names matching [keep-regex] are left alone (for builds that
+# load backends by filename; none today). Files not in the manifest (bundled system libraries
+# such as libnccl) are never touched. Idempotent. Run after RUNPATH is set; re-check any
+# build-info stamp (gpu_tuned_verify_build_info) afterwards, patchelf rewrites the files.
+# Prints "old -> new" per rename.
+gpu_tuned_rename_sonames() {
+    local stage="${1:-}" manifest="${2:-}" keep="${3:-}" name new f soname d
+    declare -A map=()
+    if [ ! -d "${stage}" ] || [ ! -f "${manifest}" ]; then
+        echo "ERROR: gpu_tuned_rename_sonames: need a stage directory and a manifest file." >&2
+        return 1
+    fi
+    command -v patchelf >/dev/null 2>&1 || { echo "ERROR: gpu_tuned_rename_sonames: patchelf is not installed." >&2; return 1; }
+    while IFS= read -r name; do
+        [ -n "${name}" ] || continue
+        if [ -n "${keep}" ] && [[ "${name}" =~ ${keep} ]]; then continue; fi
+        if [ ! -f "${stage}/${name}" ] && [ ! -f "${stage}/$(gpu_tuned_tuned_so_name "${name}")" ]; then
+            echo "ERROR: gpu_tuned_rename_sonames: '${name}' is in the manifest but not in ${stage}." >&2
+            return 1
+        fi
+        new="$(gpu_tuned_tuned_so_name "${name}")" || return 1
+        map["${name}"]="${new}"
+    done < "${manifest}"
+    # pass 1: rename the files and give each a tuned SONAME
+    for name in "${!map[@]}"; do
+        new="${map[${name}]}"
+        if [ "${name}" != "${new}" ] && [ -e "${stage}/${name}" ]; then
+            if [ -e "${stage}/${new}" ]; then
+                echo "ERROR: gpu_tuned_rename_sonames: ${new} already exists in ${stage}, so ${name} cannot be renamed to it." >&2
+                return 1
+            fi
+            mv "${stage}/${name}" "${stage}/${new}"
+            echo "${name} -> ${new}"
+        fi                                                  # else: already renamed by an earlier run
+        soname="$(patchelf --print-soname "${stage}/${new}" 2>/dev/null || true)"
+        if [ -n "${soname}" ]; then
+            if [ -n "${keep}" ] && [[ "${soname}" =~ ${keep} ]]; then continue; fi
+            patchelf --set-soname "$(gpu_tuned_tuned_so_name "${soname}")" "${stage}/${new}"
+        fi
+    done
+    # pass 2: rewrite DT_NEEDED in every ELF in the stage
+    for f in "${stage}"/*; do
+        [ -f "${f}" ] && [ ! -L "${f}" ] || continue
+        patchelf --print-needed "${f}" >/dev/null 2>&1 || continue
+        while IFS= read -r d; do
+            [ -n "${d}" ] || continue
+            if [ -n "${map[${d}]:-}" ] && [ "${map[${d}]}" != "${d}" ]; then
+                patchelf --replace-needed "${d}" "${map[${d}]}" "${f}"
+            fi
+        done < <(patchelf --print-needed "${f}" 2>/dev/null)
+    done
+}
+
+# gpu_tuned_verify_unique_sonames <stage-dir> <system-manifest|-> [keep-regex] [assume-present-regex]
+# -- the gate; it FAILS CLOSED. Every shared object in <stage-dir> must be exactly one of:
+# tuned (file name and SONAME carry the mark), kept (matches [keep-regex]), or a bundled system
+# library recorded in <system-manifest> (one name per line; "-" for none). Anything else would
+# ship under a shared identity, so a library upstream adds later breaks the package build instead
+# of slipping through. It also checks closure: every DT_NEEDED of every ELF must be a file in the
+# stage or match [assume-present-regex] (glibc, the driver, the CUDA toolkit...), and a needed name
+# carrying the mark must exist in the stage. Prints every violation, returns 1 if any.
+gpu_tuned_verify_unique_sonames() {
+    local stage="${1:-}" sysman="${2:--}" keep="${3:-}" assume="${4:-}" f n soname d bad=0
+    declare -A sysnames=()
+    if [ ! -d "${stage}" ]; then echo "ERROR: gpu_tuned_verify_unique_sonames: no such stage directory: ${stage}" >&2; return 1; fi
+    if [ "${sysman}" != "-" ]; then
+        [ -f "${sysman}" ] || { echo "ERROR: gpu_tuned_verify_unique_sonames: no such system manifest: ${sysman}" >&2; return 1; }
+        while IFS= read -r n; do [ -n "${n}" ] && sysnames["${n}"]=1; done < "${sysman}"
+    fi
+    for f in "${stage}"/*; do
+        [ -f "${f}" ] && [ ! -L "${f}" ] || continue
+        patchelf --print-needed "${f}" >/dev/null 2>&1 || continue            # not an ELF
+        n="$(basename "${f}")"
+        if [[ "${n}" =~ ^lib.+\.so(\.[0-9]+)*$ ]]; then
+            soname="$(patchelf --print-soname "${f}" 2>/dev/null || true)"
+            if [ -n "${sysnames[${n}]:-}" ]; then
+                :                                                             # bundled system library, recorded
+            elif [ -n "${keep}" ] && [[ "${n}" =~ ${keep} ]]; then
+                :                                                             # kept on purpose
+            elif [[ "${n}" == *"${GPU_TUNED_SO_MARK}.so"* ]]; then
+                if [ -n "${soname}" ] && [[ "${soname}" != *"${GPU_TUNED_SO_MARK}.so"* ]]; then
+                    echo "VIOLATION: ${n} is renamed but its SONAME is '${soname}'." >&2; bad=1
+                fi
+            else
+                echo "VIOLATION: ${n} is not tuned, not kept and not a recorded system library: it would ship under a shared identity (SONAME '${soname:-none}')." >&2; bad=1
+            fi
+        fi
+        while IFS= read -r d; do
+            [ -n "${d}" ] || continue
+            if [ -e "${stage}/${d}" ]; then continue; fi
+            if [[ "${d}" == *"${GPU_TUNED_SO_MARK}.so"* ]]; then
+                echo "VIOLATION: ${n} needs ${d}, which is not in the stage." >&2; bad=1
+            elif [ -n "${assume}" ] && [[ "${d}" =~ ${assume} ]]; then
+                continue
+            else
+                echo "VIOLATION: ${n} needs ${d}, which is neither in the stage nor assumed present on the target." >&2; bad=1
+            fi
+        done < <(patchelf --print-needed "${f}" 2>/dev/null)
+    done
+    return "${bad}"
 }
 
 # gpu_tuned_check_main_current [repo-dir] -- fails loudly if the tuning counter
