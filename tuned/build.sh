@@ -39,7 +39,25 @@ RAFT_LIB_NAME="raft-${GPU_TUNED_VARIANT}-${CUDA_TAG}"
 RAPIDS_CMAKE_PIN_SHA="8fc2d05e4b29a2fb7a355192ce19190fcf24c37f"
 
 BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
+gpu_tuned_assert_cmake_cache_consistent "${BUILD_DIR}" || exit 1
+
+# Timing: ninja appends to this log across runs, so only what lands after this point is this build.
+NINJA_LOG="${BUILD_DIR}/.ninja_log"
+NINJA_OFFSET=0
+[[ -f "${NINJA_LOG}" ]] && NINJA_OFFSET="$(wc -c < "${NINJA_LOG}")"
+BUILD_T0="${EPOCHSECONDS}"
+ccache -z >/dev/null 2>&1 || true
+
 LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA}\""
+
+echo ""
+echo "Build timing (wall $(( EPOCHSECONDS - BUILD_T0 ))s):"
+if [[ -f "${NINJA_LOG}" ]] && gpu_tuned_ninja_timing "${NINJA_LOG}" "${NINJA_OFFSET}" "${GPU_TUNED_BUILD_ROOT}/timing.tsv" "CMakeFiles/"; then
+    echo "  per-target timings: ${GPU_TUNED_BUILD_ROOT}/timing.tsv"
+else
+    echo "  (no per-target timings: nothing was rebuilt, or ninja logged nothing)"
+fi
+command -v ccache >/dev/null 2>&1 && echo "ccache: $(ccache -s | grep -E 'Hits:|Misses:' | head -2 | tr -s ' ' | tr '\n' ' ')"
 
 gpu_tuned_verify_arch "${BUILD_DIR}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 

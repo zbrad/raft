@@ -110,6 +110,38 @@ CUDA_TAG="${CUDA_TAG:-cu${CUDA_VERSION_COMPACT}}"
 
 export CUDA_HOME CUDA_VERSION CUDA_VERSION_COMPACT CUDA_TAG
 
+# --- Output layout: one tree per toolkit, tuned/build/<cuda-tag>/ (gitignored via build/), with no
+#     variant level: cmake/ (the one fixed compile path), dist/, dist-shared/, releases/ (generated
+#     checksums and test logs; the tracked RELEASE_NOTES_*.md stay in tuned/releases/), ccache/,
+#     timing.tsv. gpu_tuned_out_dir (common.sh) names these; the claim refuses a tree last used by
+#     another variant. ---
+GPU_TUNED_REPO_ROOT="$(cd "${GPU_TUNED_SELF_DIR}/.." && pwd)"
+gpu_tuned_claim_toolkit_tree "${GPU_TUNED_REPO_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}" || return 1 2>/dev/null || exit 1
+GPU_TUNED_BUILD_ROOT="${GPU_TUNED_REPO_ROOT}/tuned/build/${CUDA_TAG}"
+# ccache per toolkit (upstream's build.sh --cache-tool=ccache passes it to CMake as the compiler
+# launcher). CCACHE_DIR also makes ccache ignore ~/.config/ccache/ccache.conf, so its small default
+# size cap would apply: set it here (a RAPIDS build is far larger than 5 GB).
+export CCACHE_DIR="${GPU_TUNED_BUILD_ROOT}/ccache"
+export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-40G}"
+export GPU_TUNED_BUILD_ROOT
+
+# gpu_tuned_assert_cmake_cache_consistent <cmake-build-dir>: fail if an existing CMake cache was
+# configured for another toolkit or another source tree (it would silently keep them).
+gpu_tuned_assert_cmake_cache_consistent() {
+    local cache="${1}/CMakeCache.txt" cached
+    [[ -f "${cache}" ]] || return 0
+    cached="$(sed -n 's/^CMAKE_CUDA_COMPILER:FILEPATH=//p' "${cache}" | head -1)"
+    if [[ -n "${cached}" && "${cached}" != "${CUDA_HOME}/bin/nvcc" ]]; then
+        echo "ERROR: ${cache} was configured with ${cached}, but CUDA_HOME=${CUDA_HOME}. Remove that tree first: rm -rf ${1}" >&2
+        return 1
+    fi
+    cached="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${cache}" | head -1)"
+    if [[ -n "${cached}" && "${cached}" != "${GPU_TUNED_REPO_ROOT}/cpp" ]]; then
+        echo "ERROR: ${cache} was configured for source tree ${cached}, not ${GPU_TUNED_REPO_ROOT}/cpp -- looks copied from another checkout. Remove that tree first: rm -rf ${1}" >&2
+        return 1
+    fi
+}
+
 # Prepend CUDA bin to PATH if not already present.
 case ":${PATH}:" in
     *":${CUDA_HOME}/bin:"*) ;;
