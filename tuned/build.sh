@@ -59,6 +59,11 @@ else
 fi
 command -v ccache >/dev/null 2>&1 && echo "ccache: $(ccache -s | grep -E 'Hits:|Misses:' | head -2 | tr -s ' ' | tr '\n' ' ')"
 
+# The install tree (tuned/package.sh copies <build>/install). Upstream's build step did not leave one
+# here; the prefix is baked into the CMake cache, so this is an idempotent copy.
+cmake --install "${BUILD_DIR}" >/dev/null || { echo "ERROR: cmake --install failed in ${BUILD_DIR}" >&2; exit 1; }
+[[ -f "${BUILD_DIR}/install/lib/lib${RAFT_LIB_NAME}.so" ]] || { echo "ERROR: install produced no lib${RAFT_LIB_NAME}.so under ${BUILD_DIR}/install/lib" >&2; exit 1; }
+
 gpu_tuned_verify_arch "${BUILD_DIR}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 
 # CCCL 3.4.0 is the minimum that includes the warpspeed-scan fixes needed

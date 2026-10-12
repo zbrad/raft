@@ -12,6 +12,7 @@ source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 INSTALL_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")/install"
 RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
+DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
 # Matches tuned/build.sh's RAFT_LIB_NAME (-DRAFT_OUTPUT_NAME=... baked into
 # this build dir's CMakeCache at configure time) -- the installed .so is
 # lib<this>.so, not the bare "libraft.so" upstream would otherwise produce.
@@ -44,7 +45,8 @@ SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
 SHORT_SHA="$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD)"
 PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}-g${SHORT_SHA}"
 PKG_DIR="/tmp/${PKG_NAME}"
-OUT="${PROJECT_ROOT}/${PKG_NAME}.tar.bz2"
+# The tarball goes in the per-toolkit dist/ (it used to be written into the repo root).
+OUT="${DIST_DIR}/${PKG_NAME}.tar.bz2"
 
 echo "Packaging ${PKG_NAME}..."
 rm -rf "${PKG_DIR}"
@@ -67,6 +69,7 @@ if [[ -f "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" ]]; then
     gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
 fi
 
+mkdir -p "${DIST_DIR}"
 cd /tmp
 tar -cjf "${OUT}" "${PKG_NAME}"
 echo "Created: ${OUT}"
