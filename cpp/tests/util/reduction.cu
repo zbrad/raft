@@ -164,14 +164,14 @@ struct reduction_launch {
 
   static void run_warp_reduce_with_add_op(const rmm::device_uvector<int>& arr_d,
                                           int ref_val,
-                                          rmm::cuda_stream_view stream)
+                                          cuda::stream_ref stream)
   {
     rmm::device_scalar<int> ref_d(stream);
     const int block_dim = 64;
     const int grid_dim  = 1;
-    test_warp_reduce_with_add_op_kernel<<<grid_dim, block_dim, 0, stream>>>(arr_d.data(),
-                                                                             ref_d.data());
-    stream.synchronize();
+    raft::launch_kernel(
+      stream, grid_dim, block_dim, test_warp_reduce_with_add_op_kernel, arr_d.data(), ref_d.data());
+    stream.sync();
     RAFT_CUDA_TRY(cudaPeekAtLastError());
     ASSERT_EQ(ref_d.value(stream), ref_val);
   }
