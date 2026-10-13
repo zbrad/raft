@@ -1,67 +1,57 @@
 # RAFT 26.12 — GB10 / DGX Spark Release Notes (CUDA 13.3)
 
-**Release Date**: 2026-09-21
-**Package**: `raft-26.12-gb10-cu133-g9fcf3a1f.tar.bz2`
+**Release Date**: 2026-10-12
+**Package**: `raft-26.12-gb10-cu133-g<commit>.tar.bz2` (`<commit>` is the 8-hex suffix of this release's tag)
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
 **CUDA Toolkit**: 13.3.73 (CCCL 3.5.0)
-**Commit**: [`9fcf3a1f`](https://github.com/zbrad/raft/commit/9fcf3a1f)
+**Commit**: the tag's `-g<commit>` suffix; `git log --oneline` from it shows exactly what is in this release
 
 ## Overview
 
-The 26.12 source line built against CUDA 13.3 instead of 13.4, for consumers
-that have not moved to the 13.4 toolkit. The library source (`cpp/`) is the
-same as the CUDA 13.4 release, `v26.12-gb10-cu134-g9d97792e`; the `tuned/`
-scripts differ (`tuned/common.sh`, `tuned/raft_test_common.sh`). The matching
-cuVS build (`libcuvs-gb10-cu133`) consumes this release.
+The 26.12 source line built against CUDA 13.3 instead of 13.4, for consumers that have not moved
+to the 13.4 toolkit. Same source and same changes as the CUDA 13.4 release
+`v26.12-gb10-cu134-g6ddfdeae` (see `RELEASE_NOTES_26.12_gb10_cu134.md` for the full list: upstream
+sync to `main` `56b4b2ef`, rapids-cmake pin `61a96c8f`, fork-local test fix, build completeness
+gate, per-toolkit build layout). It supersedes `v26.12-gb10-cu133-g9fcf3a1f` (2026-09-21), whose
+release and tag are deleted.
 
-**Upstream base.** This is a development build: `tuned-builds` is merged with
-upstream `NVIDIA/raft` `main` at `f197acbc` (2026-09-17), version 26.12.00,
-which upstream has not tagged. Upstream's latest tagged release is
-`v26.08.00`; its `release/26.10` branch exists but is not yet tagged.
+**Shared objects renamed.** `librmm.so` and `librapids_logger.so` carried stock RAPIDS file names
+and SONAMEs; this package ships **`librmm-tuned.so`** and **`librapids_logger-tuned.so`** (file
+name, SONAME, every `DT_NEEDED`, and the installed CMake import files). `libraft-gb10-cu133.so`
+keeps its name. **Breaking** for anything that loaded the old names; rebuild such consumers (cuVS,
+faiss) against this release. Details are in the cu134 notes.
 
-The **Driver Context** section below records which NVIDIA drivers exist for
-GB10 and what is and is not known about their memory behavior.
+**Upstream base.** A development build: `tuned-builds` is merged with upstream `NVIDIA/raft`
+`main` at `56b4b2ef`, version 26.12.00, which upstream has not tagged. Upstream's latest tagged
+release is `v26.08.00`.
+
+The **Driver Context** section below records which NVIDIA drivers exist for GB10 and what is and
+is not known about their memory behavior (written 2026-09-21, not re-researched for this release).
 
 ## Full Test Suite Result
 
-**16/16 gtest binaries passed, 0 failures.** Full output attached as
-`TEST_RESULTS_gb10.log` on this release.
+**16/16 gtest binaries passed, 0 failed; 7,605 tests passed, 44 skipped** (the same counts as the
+CUDA 13.4 build). Run 2026-10-13 from 02:01Z to 02:23Z on the build at commit `dc9b8675`, which
+has the same library sources as this release; the rename is a packaging step. Full output attached
+as `TEST_RESULTS_gb10.log` on this release.
+
+Build timing, cold ccache for this toolkit: ninja wall 301 s, 269 timed units (summed unit time
+4,187 s), ccache 3 of 242 hits.
 
 ## Compatible cuVS
 
-**How upstream cuVS pins RAFT.** cuVS does not pin a RAFT commit or release.
-Its `get_raft.cmake` requires RAFT at cuVS's own RAPIDS major.minor
-(`find_package(raft <major.minor>)`), so any installed RAFT with the same
-major.minor satisfies it. If none is found, CMake clones `rapidsai/raft` at the
-branch named in cuVS's `RAPIDS_BRANCH` file:
-
-| cuVS source | RAFT it expects |
-|---|---|
-| upstream `v26.08.01` (latest upstream release) | 26.08, branch `release/26.08` |
-| upstream `release/26.10` | 26.10, branch `release/26.10` |
-| upstream `main` and `zbrad/cuvs` `tuned-builds` | 26.12, branch `main` |
-
-This RAFT release is 26.12, so it pairs with cuVS 26.12 (`tuned-builds`, which
-tracks upstream `main`).
-
-**How our releases pair them.** Our cuVS build links against a specific
-prebuilt RAFT release tag instead of relying on that branch match. The version
-check only compares major.minor, so compatibility comes from our paired,
-tested releases:
+This RAFT release pairs with cuVS 26.12 (`tuned-builds`, which tracks upstream `main`). cuVS does
+not pin a RAFT commit; it requires RAFT at its own RAPIDS major.minor, so compatibility comes from
+our paired, tested releases.
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| `v26.12-gb10-cu133-g9fcf3a1f` | [`v26.12-gb10-cu133-g1c38fcf18`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu133-g1c38fcf18) |
+| this release | _pending: cuVS cu133 has not been rebuilt against it yet_ |
 
-The cuVS build made against this RAFT's CUDA 13.3 install passed its full test
-suite (35/35 gtest binaries; one known-flaky case, `KmeansFitBatchedTestF.Result/4`,
-is excluded from the gate). The pairing for every release is recorded in the
-cuVS repository's `tuned/docs/RELEASE_PINS.md`.
-
-Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a
-different RAPIDS version, or against a different CUDA toolkit than the one this
-RAFT was built with, is not covered by these tests.
+Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a different RAPIDS
+version, or against a different CUDA toolkit than the one this RAFT was built with, is not covered
+by these tests.
 
 ## Driver Context
 
@@ -249,10 +239,11 @@ launch has not been tested.
 
 ```
 git clone git@github.com:zbrad/raft.git && cd raft
-git checkout 9fcf3a1f
+git checkout <the release tag>
 CUDA_HOME=/usr/local/cuda-13.3 bash tuned/build.sh gb10
 CUDA_HOME=/usr/local/cuda-13.3 bash tuned/full_test.sh gb10   # must pass before packaging
 CUDA_HOME=/usr/local/cuda-13.3 bash tuned/package.sh gb10
+CUDA_HOME=/usr/local/cuda-13.3 bash tuned/release.sh gb10     # publishes, after the gates
 ```
 
 See `tuned/docs/RELEASE_PINS.md` for the `rapids-cmake` pin each release
