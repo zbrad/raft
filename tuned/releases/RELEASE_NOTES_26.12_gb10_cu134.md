@@ -28,6 +28,19 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
 
 ## What Changed
 
+- **Unique shared-object identities for the rapids chain.** `librmm.so` and `librapids_logger.so`
+  carried the same file names and SONAMEs as stock RAPIDS, so a stock install (or an
+  `LD_LIBRARY_PATH` pointing at one) could be loaded in place of ours, or ours in place of theirs.
+  They are now **`librmm-tuned.so`** and **`librapids_logger-tuned.so`**: file name, SONAME and every
+  `DT_NEEDED` that names them, and the installed CMake import files (`rmm-targets-release.cmake`,
+  `rapids_logger-targets-release.cmake`) point at the new names, so `find_package(raft)` consumers
+  link them without changes. `libraft-gb10-cu134.so` already carries variant and CUDA tag and keeps
+  its name; `libraft.a` is an archive with no SONAME. The rename is a patchelf pass at packaging time
+  (`tuned/package.sh`, `gpu_tuned_rename_sonames`), and packaging fails closed unless every shared
+  object is renamed or kept and every dependency resolves inside the tree. **This is a breaking
+  change for anything that loaded `librmm.so` / `librapids_logger.so` from an earlier raft
+  release by name**; rebuild such consumers against this release (zbrad/cuvs and zbrad/faiss do).
+  The library code is identical to `v26.12-gb10-cu134-ga5db5823`; only the shipped names differ.
 - **Shared rapids-cmake pin moved `8fc2d05e` -> `61a96c8f`.** rapids-cmake's "Update cuco for
   RoaringBitmap use in cuVS (#1095)". The merged zbrad/cuvs (upstream `#2446`, roaring-bitmap CAGRA
   filter) calls `cuco::roaring_bitmap::from_indices`, which the older pinned cuco lacks, so cuvs could
@@ -91,7 +104,7 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
 fork-local `WarpReduceAddOpTest`). Skipped: 4 in `CORE_TEST` that require at least 2 CUDA devices
 (this host has one GPU), and 40 `SelectK` parameter cases in `MATRIX_SELECT_TEST` that the test
 itself skips (`select_k.cuh:232`, no reason printed). Run 2026-10-12 against the build at commit
-`798e2ea8` (the new rapids-cmake pin), started 10:51Z and finished 11:11Z; the same counts came out
+`798e2ea8` (the new rapids-cmake pin; the compiled libraries are unchanged by the rename, which happens at packaging), started 10:51Z and finished 11:11Z; the same counts came out
 of the earlier run on the old pin (commit `80490e0c`). Full output attached as `TEST_RESULTS_gb10.log` on
 this release.
 
@@ -159,8 +172,8 @@ published release to its commit + rapids-cmake pin.
 
 ### Shared Libraries (lib/)
 - `libraft-gb10-cu134.so` — RAFT runtime library, built for SM_121a
-- `librmm.so` — RAPIDS Memory Manager (CPM-fetched by raft's own build)
-- `librapids_logger.so` — Logging utilities
+- `librmm-tuned.so` — RAPIDS Memory Manager (CPM-fetched by raft's own build)
+- `librapids_logger-tuned.so` — Logging utilities
 
 ### Headers (include/)
 - `raft/`, `raft_runtime/`, `rmm/`, `rapids_logger/`, `rapids/`, `nvtx3/`
