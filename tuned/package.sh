@@ -80,7 +80,9 @@ echo ""
 echo "Giving the rapids-chain shared objects unique identities:"
 OURS_MANIFEST="$(mktemp)"
 for so in librmm.so librapids_logger.so; do
-    [[ -f "${PKG_DIR}/lib/${so}" ]] || { echo "ERROR: ${PKG_DIR}/lib/${so} is missing; the rename list is stale." >&2; exit 1; }
+    # tuned/build.sh already builds these under their -tuned names; a stock-named file here is renamed by
+    # the helper (and an older install tree would be caught by its gate), a missing one is a stale list.
+    [[ -f "${PKG_DIR}/lib/${so}" || -f "${PKG_DIR}/lib/$(gpu_tuned_tuned_so_name "${so}")" ]] || { echo "ERROR: neither ${so} nor its tuned name is in ${PKG_DIR}/lib; the rename list is stale." >&2; exit 1; }
     echo "${so}" >> "${OURS_MANIFEST}"
 done
 KEEP_RE="^lib${RAFT_LIB_NAME}\\.so\$"
