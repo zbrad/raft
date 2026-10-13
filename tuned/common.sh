@@ -1640,6 +1640,30 @@ cmake_language(DEFER DIRECTORY "\${CMAKE_SOURCE_DIR}" CALL tuned_mark_shared_lib
 CMAKE
 }
 
+# gpu_tuned_cmake_ignore_pip_prefixes -- print (no newline) the semicolon list of user-site pip prefixes
+# a build must not search: ~/.local/lib/python*/site-packages itself and every package directory
+# under it that ships CMake config (lib*/cmake or share/cmake). Pass it as
+#   -DCMAKE_IGNORE_PREFIX_PATH=<list>
+# Why: pip wheels such as librmm install complete CMake packages (nvtx3, rmm, rapids_logger ...), and
+# CMake finds them through the site-packages directories. A dependency found there is not fetched, so
+# it is not installed with our package either: the tarball's rmm-dependencies.cmake then asks for
+# nvtx3 that the package does not contain, and the build also silently depends on whatever stock
+# wheel happens to be installed. Prints nothing when there is no user site-packages.
+gpu_tuned_cmake_ignore_pip_prefixes() {
+    local sp d out=() IFS
+    for sp in "${HOME}"/.local/lib/python*/site-packages; do
+        [ -d "${sp}" ] || continue
+        out+=("${sp}")
+        for d in "${sp}"/*/; do
+            d="${d%/}"
+            compgen -G "${d}/lib*/cmake" >/dev/null || compgen -G "${d}/share/cmake" >/dev/null || continue
+            out+=("${d}")
+        done
+    done
+    IFS=';'
+    printf '%s' "${out[*]}"
+}
+
 # gpu_tuned_rename_package <stage-dir> <ours-manifest> <system-manifest|-> <keep-regex> <assume-present-regex> [<ref-dir>...]
 # -- the whole package-time rename in one call: gpu_tuned_rename_sonames, then every file under
 # each <ref-dir> (CMake import files, pkg-config; typically <stage>/lib/cmake and <stage>/lib/pkgconfig,

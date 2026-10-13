@@ -58,11 +58,13 @@ ccache -z >/dev/null 2>&1 || true
 # the install tree, every DT_NEEDED and the CMake export files all carry the names we ship.
 # The install tree (below) must not be found by the next configure: a cached rmm_DIR/rapids_logger_DIR
 # pointing into it makes CMake use the installed copies instead of building the dependencies, so the
-# renamed targets would not exist. Hence the ignored prefix and the two -U.
+# renamed targets would not exist. Hence the ignored prefix and the two -U. The pip wheels in the user
+# site-packages are ignored too: they ship CMake packages (nvtx3, rmm ...) that CMake would find instead
+# of fetching, so nvtx3 would not be installed with our package.
 SO_NAMES_CMAKE="${GPU_TUNED_BUILD_ROOT}/so_names.cmake"
 gpu_tuned_so_names_cmake "${SO_NAMES_CMAKE}" || exit 1
 
-LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install -Urmm_DIR -Urapids_logger_DIR\""
+LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR\""
 
 # Completeness gate. Upstream's build.sh exits 0 even when a test target fails to compile (a
 # release was nearly published with UTILS_TEST silently missing), and tuned/full_test.sh only runs
