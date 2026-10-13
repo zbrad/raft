@@ -84,21 +84,12 @@ for so in librmm.so librapids_logger.so; do
     echo "${so}" >> "${OURS_MANIFEST}"
 done
 KEEP_RE="^lib${RAFT_LIB_NAME}\\.so\$"
-gpu_tuned_rename_sonames "${PKG_DIR}/lib" "${OURS_MANIFEST}" "${KEEP_RE}" | sed 's/^/  /'
+# Renames, repoints the installed CMake import files, then fails closed: every shared object is
+# renamed or the kept raft lib, every DT_NEEDED resolves in the tree or is a toolkit/system library.
+gpu_tuned_rename_package "${PKG_DIR}/lib" "${OURS_MANIFEST}" - "${KEEP_RE}" \
+    '^(linux-vdso\.so|ld-linux|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libgcc_s\.so|libstdc\+\+\.so|libcuda\.so|libcudart\.so|libcublas\.so|libcublasLt\.so|libcusolver\.so|libcusparse\.so)' \
+    "${PKG_DIR}/lib/cmake" "${PKG_DIR}/lib/pkgconfig" || { rm -f "${OURS_MANIFEST}"; exit 1; }
 rm -f "${OURS_MANIFEST}"
-for so in librmm librapids_logger; do
-    # cmake import files name the file and the SONAME; rewrite only those exact quoted/path forms
-    grep -rlE "${so}\\.so" "${PKG_DIR}/lib/cmake" | while IFS= read -r cf; do
-        sed -i -E "s#${so}\\.so#${so}${GPU_TUNED_SO_MARK}.so#g" "${cf}"
-    done
-done
-# fail closed: every shared object is tuned or the kept raft lib, every DT_NEEDED resolves in the tree
-# or is a toolkit/system library the target provides
-gpu_tuned_verify_unique_sonames "${PKG_DIR}/lib" - "${KEEP_RE}" '^(linux-vdso\.so|ld-linux|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libgcc_s\.so|libstdc\+\+\.so|libcuda\.so|libcudart\.so|libcublas\.so|libcublasLt\.so|libcusolver\.so|libcusparse\.so)' || exit 1
-if grep -rE 'librmm\.so|librapids_logger\.so' "${PKG_DIR}/lib/cmake" >/dev/null; then
-    echo "ERROR: CMake import files still name an unmarked librmm.so/librapids_logger.so." >&2
-    exit 1
-fi
 # patchelf rewrote the files; the build-info stamp on the raft lib must have survived
 gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
 
