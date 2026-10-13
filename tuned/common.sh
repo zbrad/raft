@@ -1664,6 +1664,120 @@ gpu_tuned_cmake_ignore_pip_prefixes() {
     printf '%s' "${out[*]}"
 }
 
+# gpu_tuned_warn_pip_cmake_packages -- warn loudly (stderr) when user-site pip wheels ship CMake
+# packages (the ones gpu_tuned_cmake_ignore_pip_prefixes tells CMake to ignore), naming each wheel and
+# printing the pip command that removes them. The build is safe either way (they are ignored); the
+# warning is that a stock wheel is installed that could shadow our libraries at run time and that
+# nothing built here is tested against. Only wheels whose names clash with what this fleet ships are
+# named (GPU_TUNED_CONFLICT_WHEEL_RE, default librmm, rapids_logger, libkvikio, libraft, libcuvs);
+# unrelated CMake-shipping wheels such as torch are never suggested for removal. Always returns 0; prints nothing when there are none.
+gpu_tuned_warn_pip_cmake_packages() {
+    local ign sp d di base names=() pkg
+    ign="$(gpu_tuned_cmake_ignore_pip_prefixes)"
+    [ -n "${ign}" ] || return 0
+    while IFS= read -r d; do
+        [ -n "${d}" ] || continue
+        case "${d}" in */site-packages) continue ;; esac
+        sp="${d%/*}"; pkg="${d##*/}"
+        for di in "${sp}"/*.dist-info; do
+            [ -f "${di}/RECORD" ] || continue
+            if grep -q "^${pkg}/" "${di}/RECORD" 2>/dev/null; then
+                base="${di##*/}"; base="${base%%-*}"
+                [[ "${base}" =~ ${GPU_TUNED_CONFLICT_WHEEL_RE:-^(librmm|rapids_logger|libkvikio|libraft|libcuvs)} ]] && names+=("${base}")
+                break
+            fi
+        done
+    done < <(printf '%s\n' "${ign}" | tr ';' '\n')
+    [ "${#names[@]}" -gt 0 ] || return 0
+    {
+        echo ""
+        echo "################################################################################"
+        echo "WARNING: stock pip wheels that ship CMake packages are installed in your user site-packages:"
+        printf '    %s\n' "${names[@]}"
+        echo "This build IGNORES them (CMAKE_IGNORE_PREFIX_PATH), so it is not affected. But they carry the"
+        echo "stock librmm/nvtx3/... names this fleet replaces, and could be loaded in place of ours at run time."
+        case " ${names[*]} " in *" librmm"*) echo "nvtx3: librmm bundles its own nvtx3. That is NOT the tuned copy: the fleet fetches nvtx3 at the pinned"; echo "rapids-cmake, tests against it and ships it. The wheel's copy is unpinned and untested here (an equal version number"; echo "does not show the contents match), so a build that used it would not be the build that was tested." ;; esac
+        echo "Remove them with:"
+        echo "    python3 -m pip uninstall -y ${names[*]}"
+        echo "(anything that depends on them, e.g. rmm-cu13 or pylibraft, must go too; pip lists dependents)"
+        echo "################################################################################"
+        echo ""
+    } >&2
+    return 0
+}
+
+# gpu_tuned__nvtx3_from_pip <cache> <ignore-list> -- true if the cache's nvtx3_DIR is under an ignored pip prefix.
+gpu_tuned__nvtx3_from_pip() {
+    local v p
+    v="$(grep -E '^nvtx3_DIR:[A-Z]+=' "${1}" | head -1)"; v="${v#*=}"
+    while IFS= read -r p; do
+        [ -n "${p}" ] || continue
+        case "${v}" in "${p}"|"${p}"/*) return 0 ;; esac
+    done < <(printf '%s\n' "${2}" | tr ';' '\n')
+    return 1
+}
+
+# gpu_tuned_verify_no_pip_cmake_deps <CMakeCache.txt> -- fail (rc 1, names each entry) if any *_DIR or
+# *_ROOT entry of a build's CMake cache points into a user-site pip prefix (see
+# gpu_tuned_cmake_ignore_pip_prefixes). The ignore list should make that impossible, so this is the
+# check that it did: a dependency (nvtx3, rmm ...) resolved from a stock wheel is not fetched, so it is
+# missing from the package built from this tree. Run it after configure; a stale cache from before the
+# ignore list is caught too (the entry must be unset with -U<var>).
+gpu_tuned_verify_no_pip_cmake_deps() {
+    local cache="${1:-}" ign p line bad=0
+    [ -f "${cache}" ] || { echo "ERROR: gpu_tuned_verify_no_pip_cmake_deps: no such cache file: ${cache}" >&2; return 1; }
+    ign="$(gpu_tuned_cmake_ignore_pip_prefixes)"
+    [ -n "${ign}" ] || return 0
+    while IFS= read -r line; do
+        while IFS= read -r p; do
+            [ -n "${p}" ] || continue
+            case "${line#*=}" in "${p}"|"${p}"/*) echo "ERROR: CMake resolved ${line%%:*} from a pip wheel: ${line#*=}" >&2; bad=1; break ;; esac
+        done < <(printf '%s\n' "${ign}" | tr ';' '\n')
+    done < <(grep -E '^[A-Za-z0-9_]+_(DIR|ROOT):[A-Z]+=' "${cache}" | grep -vE '^CMAKE_')
+    if grep -qE '^nvtx3_DIR:[A-Z]+=' "${cache}" && [ "${bad}" -ne 0 ] && gpu_tuned__nvtx3_from_pip "${cache}" "${ign}"; then
+        echo "  nvtx3: this is NOT the tuned copy. The fleet fetches nvtx3 at the pinned rapids-cmake, builds and tests against" >&2
+        echo "  that copy and ships it in the package. The wheel's copy is unpinned, untested here and unaligned with the rest of" >&2
+        echo "  the tree; an equal version number (both 3.2.0 when this was written) does not show the contents match." >&2
+    fi
+    [ "${bad}" -eq 0 ] || echo "  Remove the wheel (see gpu_tuned_warn_pip_cmake_packages) and reconfigure with -U<var> for each entry above." >&2
+    return "${bad}"
+}
+
+# gpu_tuned_verify_consumer_configure <package-dir> <cmake-package>... -- prove the package is usable by a
+# consumer: configure a minimal CMake project that does find_package(<name> REQUIRED CONFIG) for each
+# name against ONLY <package-dir> (CMAKE_PREFIX_PATH), with the user-site pip prefixes ignored, then
+# require that nvtx3_DIR, rmm_DIR and rapids_logger_DIR (those the consumer resolved) point inside
+# <package-dir> and that nvtx3_DIR is set. This is the failure a consumer such as zbrad/faiss hits when
+# a package leaves a dependency out: its CMake files ask for it and nothing in the package answers.
+# Needs cmake; the CUDA toolkit must be findable (find_dependency(CUDAToolkit)). rc 1 and the CMake
+# output on failure.
+gpu_tuned_verify_consumer_configure() {
+    local pkg="${1:-}" tmp rc=0 var val
+    shift || true
+    [ -d "${pkg}" ] && [ "$#" -gt 0 ] || { echo "ERROR: gpu_tuned_verify_consumer_configure: need <package-dir> and at least one package name." >&2; return 1; }
+    pkg="$(cd "${pkg}" && pwd -P)"
+    tmp="$(mktemp -d)" || return 1
+    {
+        printf 'cmake_minimum_required(VERSION 3.26)\nproject(tuned_consumer CXX)\n'
+        for var in "$@"; do printf 'find_package(%s REQUIRED CONFIG)\n' "${var}"; done
+    } > "${tmp}/CMakeLists.txt"
+    if ! cmake -S "${tmp}" -B "${tmp}/b" "-DCMAKE_PREFIX_PATH=${pkg}" "-DCMAKE_IGNORE_PREFIX_PATH=$(gpu_tuned_cmake_ignore_pip_prefixes)" > "${tmp}/log" 2>&1; then
+        echo "ERROR: a consumer cannot configure against ${pkg} (find_package $*):" >&2
+        sed 's/^/  /' "${tmp}/log" >&2
+        rm -rf "${tmp}"; return 1
+    fi
+    for var in nvtx3_DIR rmm_DIR rapids_logger_DIR; do
+        val="$(grep -E "^${var}:[A-Z]+=" "${tmp}/b/CMakeCache.txt" | head -1)"; val="${val#*=}"
+        if [ -z "${val}" ] || [[ "${val}" == *-NOTFOUND ]]; then
+            [ "${var}" = nvtx3_DIR ] && { echo "ERROR: the consumer never resolved nvtx3 from ${pkg}; the package does not ship it." >&2; rc=1; }
+            continue
+        fi
+        case "${val}" in "${pkg}"/*) ;; *) echo "ERROR: the consumer resolved ${var} outside the package: ${val}" >&2; rc=1 ;; esac
+    done
+    rm -rf "${tmp}"
+    return "${rc}"
+}
+
 # gpu_tuned_rename_package <stage-dir> <ours-manifest> <system-manifest|-> <keep-regex> <assume-present-regex> [<ref-dir>...]
 # -- the whole package-time rename in one call: gpu_tuned_rename_sonames, then every file under
 # each <ref-dir> (CMake import files, pkg-config; typically <stage>/lib/cmake and <stage>/lib/pkgconfig,

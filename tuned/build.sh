@@ -61,10 +61,15 @@ ccache -z >/dev/null 2>&1 || true
 # renamed targets would not exist. Hence the ignored prefix and the two -U. The pip wheels in the user
 # site-packages are ignored too: they ship CMake packages (nvtx3, rmm ...) that CMake would find instead
 # of fetching, so nvtx3 would not be installed with our package.
+gpu_tuned_warn_pip_cmake_packages
 SO_NAMES_CMAKE="${GPU_TUNED_BUILD_ROOT}/so_names.cmake"
 gpu_tuned_so_names_cmake "${SO_NAMES_CMAKE}" || exit 1
 
 LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR\""
+
+# Nothing the configure resolved may come from a pip wheel: it would not be the fetched, tested copy and
+# would be missing from the package (see gpu_tuned_verify_no_pip_cmake_deps).
+gpu_tuned_verify_no_pip_cmake_deps "${BUILD_DIR}/CMakeCache.txt" || exit 1
 
 # Completeness gate. Upstream's build.sh exits 0 even when a test target fails to compile (a
 # release was nearly published with UTILS_TEST silently missing), and tuned/full_test.sh only runs

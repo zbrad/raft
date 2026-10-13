@@ -95,12 +95,17 @@ rm -f "${OURS_MANIFEST}"
 # patchelf rewrote the files; the build-info stamp on the raft lib must have survived
 gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
 
-# Self-containment gate: a package whose installed CMake files ask for nvtx3 must ship it. Found in a
-# pip wheel instead of fetched, it is silently left out and consumers (faiss) fail to configure.
-if grep -rqE 'find_dependency\(nvtx3' "${PKG_DIR}/lib/cmake" 2>/dev/null && ! compgen -G "${PKG_DIR}/lib*/cmake/nvtx3/nvtx3-config.cmake" >/dev/null; then
-    echo "ERROR: ${PKG_NAME}'s CMake files require nvtx3 but the package ships no nvtx3 config; it was found outside the build (a pip wheel?) instead of fetched." >&2
-    exit 1
+# Self-containment gates. A package whose installed CMake files ask for nvtx3 must ship it (config and
+# headers): found in a pip wheel instead of fetched, it is silently left out and consumers (faiss) fail
+# to configure. Then prove it the way a consumer would: configure a minimal project against this
+# package alone and require nvtx3, rmm and rapids_logger to resolve inside it.
+if grep -rqE 'find_dependency\(nvtx3' "${PKG_DIR}/lib/cmake" 2>/dev/null; then
+    if ! compgen -G "${PKG_DIR}/lib*/cmake/nvtx3/nvtx3-config.cmake" >/dev/null || [[ ! -f "${PKG_DIR}/include/nvtx3/nvtx3.hpp" ]]; then
+        echo "ERROR: ${PKG_NAME}'s CMake files require nvtx3 but the package does not ship its config and headers; it was found outside the build (a pip wheel?) instead of fetched. That copy is not the tuned, tested one." >&2
+        exit 1
+    fi
 fi
+gpu_tuned_verify_consumer_configure "${PKG_DIR}" rmm raft || exit 1
 
 mkdir -p "${DIST_DIR}"
 cd /tmp
