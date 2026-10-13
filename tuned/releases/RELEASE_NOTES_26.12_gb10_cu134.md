@@ -41,6 +41,17 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
   change for anything that loaded `librmm.so` / `librapids_logger.so` from an earlier raft
   release by name**; rebuild such consumers against this release (zbrad/cuvs and zbrad/faiss do).
   The library code is identical to `v26.12-gb10-cu134-ga5db5823`; only the shipped names differ.
+- **nvtx3 is now fetched and shipped.** The previous raft packages did not contain nvtx3, although
+  the installed `rmm-dependencies.cmake` calls `find_dependency(nvtx3)`: the build had resolved
+  nvtx3 from a stock pip `librmm` wheel in the build host's user site-packages, so CMake never
+  fetched it and never installed it. A consumer configured against the package alone (zbrad/faiss)
+  failed with nvtx3 missing. The build now ignores user-site pip CMake packages
+  (`CMAKE_IGNORE_PREFIX_PATH`), so nvtx3 is fetched at the pinned rapids-cmake and installed
+  (`lib/cmake/nvtx3/`, `include/nvtx3/`; 3.2.0, header-only, so it has no `-tuned` shared object).
+  The build fails if any `*_DIR` in its CMake cache points into a pip wheel, and packaging fails
+  unless nvtx3 is in the package and a minimal consumer project configures against the package
+  alone with `nvtx3`, `rmm` and `rapids_logger` resolving inside it. A stock wheel's nvtx3 is not
+  the tuned, tested copy, and the build warns loudly when such a wheel is installed.
 - **Shared rapids-cmake pin moved `8fc2d05e` -> `61a96c8f`.** rapids-cmake's "Update cuco for
   RoaringBitmap use in cuVS (#1095)". The merged zbrad/cuvs (upstream `#2446`, roaring-bitmap CAGRA
   filter) calls `cuco::roaring_bitmap::from_indices`, which the older pinned cuco lacks, so cuvs could
@@ -103,10 +114,10 @@ ccache hit across rebuilds: measured on this build, cold 275 s of ninja wall tim
 `RANDOM_TEST`, `SOLVERS_TEST`, `SPARSE_TEST`, `STATS_TEST`, `UTILS_TEST` (237 tests, including the
 fork-local `WarpReduceAddOpTest`). Skipped: 4 in `CORE_TEST` that require at least 2 CUDA devices
 (this host has one GPU), and 40 `SelectK` parameter cases in `MATRIX_SELECT_TEST` that the test
-itself skips (`select_k.cuh:232`, no reason printed). Run 2026-10-12 against the build at commit
-`798e2ea8` (the new rapids-cmake pin; the compiled libraries are unchanged by the rename, which happens at packaging), started 10:51Z and finished 11:11Z; the same counts came out
-of the earlier run on the old pin (commit `80490e0c`). Full output attached as `TEST_RESULTS_gb10.log` on
-this release.
+itself skips (`select_k.cuh:232`, no reason printed). Run 2026-10-13 against the build at commit
+`adfe914d` (the first build that fetches and ships nvtx3; the library code is unchanged from the
+`798e2ea8` build), started 20:10Z and finished 20:32Z, one binary at a time; the same counts came
+out of the earlier runs. Full output attached as `TEST_RESULTS_gb10.log` on this release.
 
 ## Compatible cuVS
 
