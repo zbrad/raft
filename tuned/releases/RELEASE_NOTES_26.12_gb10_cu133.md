@@ -59,7 +59,7 @@ our paired, tested releases.
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| this release | _pending: the matching cuVS cu133 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu133-gcc3a7a1b` was built against the superseded `g680788c8`, which lacks nvtx3)_ |
+| this release | [`v26.12-gb10-cu133-g1f3c58b6`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu133-g1f3c58b6) (37/37 cuVS gtest binaries) |
 
 Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a different RAPIDS
 version, or against a different CUDA toolkit than the one this RAFT was built with, is not covered
