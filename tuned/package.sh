@@ -43,17 +43,17 @@ PKG_DIR="/tmp/${PKG_NAME}"
 OUT="${DIST_DIR}/${PKG_NAME}.tar.bz2"
 
 # The install tree is what gets packaged, so it must come from the source at HEAD: the commit stamped
-# into its lib when it was built (.raft_build_info "@ <sha>") may differ from HEAD only in tuned/
+# into the build-tree lib when it was built (.raft_build_info "@ <sha>") may differ from HEAD only in tuned/
 # (scripts, notes, docs), never in the library's source. A build tree left over from other source
 # would otherwise be packaged and named for today.
-BUILD_STAMP_LIB="${INSTALL_DIR}/lib/lib${RAFT_LIB_NAME}.so"
+BUILD_STAMP_LIB="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")/lib${RAFT_LIB_NAME}.so"   # tuned/build.sh stamps this one; the installed copy may predate the stamp
 [[ -f "${BUILD_STAMP_LIB}" ]] || { echo "ERROR: ${BUILD_STAMP_LIB} not found; run tuned/build.sh ${GPU_TUNED_VARIANT} for ${CUDA_TAG} first." >&2; exit 1; }
 BUILD_COMMIT="$(readelf -p .raft_build_info "${BUILD_STAMP_LIB}" 2>/dev/null | sed -n 's/.* @ \([0-9a-f]\{7,40\}\),.*/\1/p' | head -1)"
 [[ -n "${BUILD_COMMIT}" ]] || { echo "ERROR: ${BUILD_STAMP_LIB} carries no readable build commit (.raft_build_info)." >&2; exit 1; }
 git -C "${PROJECT_ROOT}" cat-file -e "${BUILD_COMMIT}^{commit}" 2>/dev/null || { echo "ERROR: the library was built at ${BUILD_COMMIT}, which is not in this checkout." >&2; exit 1; }
 STALE_SRC="$(git -C "${PROJECT_ROOT}" diff --name-only "${BUILD_COMMIT}" HEAD -- . ':!tuned' | head -5)"
 if [[ -n "${STALE_SRC}" ]]; then
-    echo "ERROR: the install tree was built at ${BUILD_COMMIT}, but source outside tuned/ changed since then:" >&2
+    echo "ERROR: the build was made at ${BUILD_COMMIT}, but source outside tuned/ changed since then:" >&2
     echo "${STALE_SRC}" | sed 's/^/    /' >&2
     echo "  Rebuild (tuned/build.sh ${GPU_TUNED_VARIANT}) and re-test before packaging." >&2
     exit 1
