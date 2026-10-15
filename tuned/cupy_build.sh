@@ -41,7 +41,7 @@ source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 CUPY_VERSION="${CUPY_VERSION:-14.0.1}"
 CUDA_ARCH="${CUDA_ARCH:-${GPU_TUNED_CUDA_ARCH}}"
 DIST_DIR="${DIST_DIR:-$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")}"
-JOBS="${CUPY_NUM_BUILD_JOBS:-$(nproc)}"
+JOBS="${CUPY_NUM_BUILD_JOBS:-$(gpu_tuned_jobs)}"
 NVCC_THREADS="${CUPY_NUM_NVCC_THREADS:-2}"
 
 # The virtual (PTX) arch and real arch match for every variant here (e.g.
