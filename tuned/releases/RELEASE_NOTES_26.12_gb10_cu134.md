@@ -129,7 +129,7 @@ per CUDA toolkit below.
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| this release | _pending: the matching cuVS cu134 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu134-g6bb1419c` was built against the superseded `9d97792e`)_ |
+| this release | [`v26.12-gb10-cu134-g424288ff`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu134-g424288ff) (37/37 cuVS gtest binaries) |
 
 Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a
 different RAPIDS version, or against a different CUDA toolkit than the one this
