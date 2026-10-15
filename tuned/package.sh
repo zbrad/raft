@@ -26,24 +26,18 @@ VERSION="$(tr -d '\r' < "${PROJECT_ROOT}/VERSION")"
 # convention (older tags, RELEASE_NOTES_26.8_*.md), kept deliberately even
 # though cuvs's own PKG_NAME/tag uses its full VERSION unshortened.
 SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
-# <short_ver>-<variant>-<cuda_tag>: variant-then-cuda_tag order now matches
-# zbrad/cuvs's release-tag order (v${CUVS_VERSION}-${GPU_TUNED_VARIANT}-
-# ${CUDA_TAG} there) -- this used to be <short_ver>-cuda<compact>-<variant>
-# (cuda tag before variant), which didn't match cuvs's order despite both
-# repos otherwise following the same scheme.
-#
-# -g<short-sha> suffix: raft's own VERSION only bumps when upstream cuts
-# a real release, so multiple genuinely different tuned-builds rebuilds
-# (different commits, different content) can share the same SHORT_VER --
-# confirmed 2026-09-08, had to delete-and-recreate v26.10-gb10-cu133 to
-# republish today's build over the identical Aug 7 tag. The commit
-# suffix makes every build's tag unique without inventing a synthetic
-# sub-version number; `git log --oneline` off the short hash always
-# tells you exactly what's in a given release. Must match release.sh's
-# own identical computation -- independent, not passed between them,
-# same pattern as SHORT_VER/RELEASE_NOTES_FILE above.
+# Release identity: the UTC date label (docs/ARCHITECTURE.md E2-E4), not the upstream version or a
+# sha. The label is HEAD's UTC commit date plus the lowest unused sequence for that date among the
+# repo's tags (gpu_tuned_allocate_date_label; GPU_TUNED_LABEL_SEQ=<n> chooses it offline). It is
+# allocated once, here, and recorded in package-info.txt: release.sh reads it from there and never
+# recomputes it. The upstream version (VERSION, SHORT_VER) is information for the title and notes.
+# Releases published before 2026-10-15 are v<short_ver>-<variant>-<cuda_tag>-g<sha> and are not
+# renamed; consumers accept both shapes and prefer a date-label tag.
+rm -f "${DIST_DIR}/package-info.txt"
+LABEL="$(gpu_tuned_allocate_date_label "${PROJECT_ROOT}")" || exit 1
+RELEASE_TAG="$(gpu_tuned_native_tag "${GPU_TUNED_VARIANT}" "${CUDA_TAG}" "${LABEL}")" || exit 1
 SHORT_SHA="$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD)"
-PKG_NAME="raft-${SHORT_VER}-${GPU_TUNED_VARIANT}-${CUDA_TAG}-g${SHORT_SHA}"
+PKG_NAME="raft-${RELEASE_TAG#v}"
 PKG_DIR="/tmp/${PKG_NAME}"
 # The tarball goes in the per-toolkit dist/ (it used to be written into the repo root).
 OUT="${DIST_DIR}/${PKG_NAME}.tar.bz2"
@@ -128,4 +122,17 @@ ${SHA256}  ${PKG_NAME}.tar.bz2
 ${MD5}  ${PKG_NAME}.tar.bz2
 EOF
 
+# Written last: its presence means the package passed every gate above. release.sh requires it.
+cat > "${DIST_DIR}/package-info.txt" <<INFO
+release_tag=${RELEASE_TAG}
+pkg_name=${PKG_NAME}
+tarball=${PKG_NAME}.tar.bz2
+upstream_version=${VERSION}
+commit=${SHORT_SHA}
+cuda_tag=${CUDA_TAG}
+variant=${GPU_TUNED_VARIANT}
+sha256=${SHA256}
+INFO
+
+echo "Packaged ${RELEASE_TAG}. Next: tuned/smoke_test.sh ${GPU_TUNED_VARIANT}, then tuned/release.sh ${GPU_TUNED_VARIANT}."
 echo "Done."
