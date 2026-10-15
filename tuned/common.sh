@@ -921,7 +921,7 @@ gpu_tuned_verify_resolves_in() {
     fi
     resolved="$(LD_LIBRARY_PATH="${dir}/lib:${dir}/lib64${GPU_TUNED_SMOKE_LD_EXTRA:+:${GPU_TUNED_SMOKE_LD_EXTRA}}" ldd "${elf}" 2>&1)" || true
     for re in "$@"; do
-        line="$(printf '%s\n' "${resolved}" | awk -v re="${re}" '$1 ~ re {print; exit}')"
+        line="$(printf '%s\n' "${resolved}" | RE="${re}" awk '$1 ~ ENVIRON["RE"] {print; exit}')"
         if [[ -z "${line}" ]]; then
             echo "ERROR: gpu_tuned_verify_resolves_in: ${elf##*/} does not list a library matching '${re}'." >&2
             rc=1

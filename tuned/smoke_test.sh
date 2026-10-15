@@ -20,6 +20,8 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=env.sh
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 
+TOOLKIT_LIB_DIR="${GPU_TUNED_TOOLKIT_LIB_DIR:-${CUDA_HOME}/lib64}"
+[[ -d "${TOOLKIT_LIB_DIR}" ]] || { echo "ERROR: toolkit lib dir ${TOOLKIT_LIB_DIR} not found." >&2; exit 1; }
 RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
 DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
 BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
@@ -55,7 +57,7 @@ run() {
     gpu_tuned_verify_consumer_configure "${EXT}" rmm raft 2>&1 && ok "a consumer configures against the extracted package alone (nvtx3, rmm, rapids_logger inside it)" \
         || fail "consumer configure against the extracted package"
 
-    export GPU_TUNED_SMOKE_LD_EXTRA="${GPU_TUNED_TOOLKIT_LIB_DIR}"
+    export GPU_TUNED_SMOKE_LD_EXTRA="${TOOLKIT_LIB_DIR}"
     local t bin libs out
     for t in CORE_TEST_NOCUDA MATRIX_SELECT_TEST UTILS_TEST; do
         bin="${BUILD_DIR}/gtests/${t}"
@@ -63,18 +65,21 @@ run() {
         libs=('^librmm-tuned\.so' '^librapids_logger-tuned\.so')
         ldd "${bin}" | grep -q "libraft-${GPU_TUNED_VARIANT}-${CUDA_TAG}" && libs+=("^libraft-${GPU_TUNED_VARIANT}-${CUDA_TAG}\\.so")
         gpu_tuned_verify_resolves_in "${EXT}" "${bin}" "${libs[@]}" 2>&1 && ok "${t}: ${libs[*]} resolve inside the package" || fail "${t}: libraries do not resolve inside the package"
-        out="$(LD_LIBRARY_PATH="${EXT}/lib:${GPU_TUNED_TOOLKIT_LIB_DIR}" "${bin}" 2>&1)"; rc=$?
+        out="$(LD_LIBRARY_PATH="${EXT}/lib:${TOOLKIT_LIB_DIR}" "${bin}" 2>&1)"; rc=$?
         if [[ ${rc} -eq 0 ]] && grep -q "^\[  PASSED  \]" <<< "${out}"; then
-            ok "${t}: $(grep '^\[  PASSED  \]' <<< "${out}" | head -1 | sed 's/^\[  PASSED  \] //'), $(grep -c '^\[  SKIPPED \]' <<< "${out}") skipped"
+            ok "${t}: $(grep '^\[  PASSED  \]' <<< "${out}" | head -1 | sed 's/^\[  PASSED  \] //; s/\.$//'), $(grep -c '^\[  SKIPPED \]' <<< "${out}") skipped"
         else
             fail "${t}: exit ${rc}"; tail -15 <<< "${out}" | sed 's/^/        /'
         fi
     done
+    echo "  complete: every check ran"
 }
 
 run 2>&1 | tee "${LOG}"
 echo "" >> "${LOG}"
-if grep -q '^  FAIL:' "${LOG}"; then
+# A pass needs the positive evidence: run() reached its end ("complete:") and nothing failed. An abort
+# inside run() (an unset variable, a failed extract) leaves no FAIL line, and must not read as a pass.
+if grep -q '^  FAIL:' "${LOG}" || ! grep -q '^  complete: every check ran' "${LOG}"; then
     echo "=== Smoke test summary: FAILED ===" | tee -a "${LOG}"
     echo "finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${LOG}"
     exit 1
