@@ -887,6 +887,52 @@ gpu_tuned_check_wheel_label() {
     return 1
 }
 
+# gpu_tuned_check_release_tag <tag> -- refuses (returns 1) unless the release tag carries the
+# date label (docs/ARCHITECTURE.md E2/E3): a native tag v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda>, or a
+# wheel tag whose version ends .cu<cuda>.<YYYYMMDD>[.<seq>]. It is gpu_tuned_date_label's own
+# grammar, so what is accepted here is what the sequence allocator sees as taken. A commit count,
+# an upstream version or a sha never names a release. GPU_TUNED_ALLOW_COUNTER_LABEL=1 also accepts a
+# tag the allocator cannot read (the retired counter and upstream-version forms), for a repo not yet
+# migrated; it says so loudly. Reads the tag text only, so it runs before anything reaches gh.
+gpu_tuned_check_release_tag() {
+    local tag="${1:-}"
+    if [[ -n "$(gpu_tuned_date_label "${tag}")" ]]; then return 0; fi
+    if [[ "${GPU_TUNED_ALLOW_COUNTER_LABEL:-}" == 1 ]]; then
+        echo "WARNING: gpu_tuned_check_release_tag: '${tag}' carries no date label (GPU_TUNED_ALLOW_COUNTER_LABEL=1); migrate this repo to v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda> (native) or <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (wheel)." >&2
+        return 0
+    fi
+    echo "ERROR: gpu_tuned_check_release_tag: release tag '${tag}' carries no date label. Native tags are v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda> (gpu_tuned_native_tag); wheel tags end <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (docs/ARCHITECTURE.md E2)." >&2
+    return 1
+}
+
+# gpu_tuned_verify_resolves_in <dir> <elf> <lib-regex>... -- the smoke-test proof that an extracted
+# package is what runs: with <dir>/lib (and <dir>/lib64) first on LD_LIBRARY_PATH, every
+# <lib-regex> (matched against the library's file name) must resolve, by ldd, to a file inside
+# <dir>, never to a build tree or a stock install. LD_LIBRARY_PATH outranks a binary's RUNPATH, so
+# a test binary built against the build tree still shows whether the package's copy is picked.
+# Fails loudly naming the library and where it resolved. Extra LD_LIBRARY_PATH entries (the
+# toolkit's) may be passed in GPU_TUNED_SMOKE_LD_EXTRA.
+gpu_tuned_verify_resolves_in() {
+    local dir="${1:-}" elf="${2:-}" re resolved line rc=0
+    shift 2 || true
+    if [[ ! -d "${dir}" || ! -f "${elf}" || $# -eq 0 ]]; then
+        echo "ERROR: gpu_tuned_verify_resolves_in: need <dir> <elf> <lib-regex>... (got dir='${dir}' elf='${elf}')." >&2
+        return 1
+    fi
+    resolved="$(LD_LIBRARY_PATH="${dir}/lib:${dir}/lib64${GPU_TUNED_SMOKE_LD_EXTRA:+:${GPU_TUNED_SMOKE_LD_EXTRA}}" ldd "${elf}" 2>&1)" || true
+    for re in "$@"; do
+        line="$(printf '%s\n' "${resolved}" | awk -v re="${re}" '$1 ~ re {print; exit}')"
+        if [[ -z "${line}" ]]; then
+            echo "ERROR: gpu_tuned_verify_resolves_in: ${elf##*/} does not list a library matching '${re}'." >&2
+            rc=1
+        elif [[ "${line}" != *"=> ${dir}/"* ]]; then
+            echo "ERROR: gpu_tuned_verify_resolves_in: ${elf##*/}: '${re}' resolves outside ${dir}: ${line}" >&2
+            rc=1
+        fi
+    done
+    return "${rc}"
+}
+
 # gpu_tuned_smoke_wheel <wheel> <dist-name> <import-name> [<stamp-section> <stamp-library>]
 # -- install a built wheel into a CLEAN throwaway venv and load it once, before anything is
 # published. Nothing from the build tree, the build venv or the repo is on the path: the probe
@@ -1063,6 +1109,7 @@ gpu_tuned_publish_release() {
     local repo="$1" tag="$2" title="$3" notes="$4"
     shift 4
     gpu_tuned_require_clean_tree || return 1
+    gpu_tuned_check_release_tag "${tag}" || return 1
     local asset path
     for asset in "$@"; do
         path="${asset%%#*}"
