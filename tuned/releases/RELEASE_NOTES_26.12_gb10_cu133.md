@@ -1,6 +1,6 @@
 # RAFT 26.12 — GB10 / DGX Spark Release Notes (CUDA 13.3)
 
-**Release Date**: 2026-10-12
+**Release Date**: 2026-10-15
 **Package**: `raft-26.12-gb10-cu133-g<commit>.tar.bz2` (`<commit>` is the 8-hex suffix of this release's tag)
 **Platform**: aarch64
 **GPU Architecture**: SM_121a (GB10 / DGX Spark, Grace Blackwell)
@@ -22,6 +22,15 @@ name, SONAME, every `DT_NEEDED`, and the installed CMake import files). `libraft
 keeps its name. **Breaking** for anything that loaded the old names; rebuild such consumers (cuVS,
 faiss) against this release. Details are in the cu134 notes.
 
+**nvtx3 is now fetched and shipped.** The previous cu133 package (`v26.12-gb10-cu133-g680788c8`) did
+not contain nvtx3, although its installed `rmm-dependencies.cmake` calls `find_dependency(nvtx3)`: that
+build had resolved nvtx3 from a stock pip `librmm` wheel in the build host's user site-packages, so a
+consumer configured against the package alone failed with nvtx3 missing. The build now ignores
+user-site pip CMake packages, so nvtx3 3.2.0 (header-only, no `-tuned` shared object) is fetched at the
+pinned rapids-cmake and installed (`lib/cmake/nvtx3/`, `include/nvtx3/`), and packaging fails unless a
+minimal consumer project configures against the package alone. Details are in the cu134 notes. This
+release supersedes `v26.12-gb10-cu133-g680788c8`.
+
 **Upstream base.** A development build: `tuned-builds` is merged with upstream `NVIDIA/raft`
 `main` at `56b4b2ef`, version 26.12.00, which upstream has not tagged. Upstream's latest tagged
 release is `v26.08.00`.
@@ -32,12 +41,15 @@ is not known about their memory behavior (written 2026-09-21, not re-researched 
 ## Full Test Suite Result
 
 **16/16 gtest binaries passed, 0 failed; 7,605 tests passed, 44 skipped** (the same counts as the
-CUDA 13.4 build). Run 2026-10-13 from 02:01Z to 02:23Z on the build at commit `dc9b8675`, which
-has the same library sources as this release; the rename is a packaging step. Full output attached
-as `TEST_RESULTS_gb10.log` on this release.
+CUDA 13.4 build). Skipped: 4 in `CORE_TEST` that require at least 2 CUDA devices (this host has one
+GPU), and 40 `SelectK` parameter cases in `MATRIX_SELECT_TEST` that the test itself skips
+(`select_k.cuh:232`, when `k` exceeds the warp-sort algorithms' `kMaxCapacity`). Run finished
+2026-10-15 04:18Z on the build at commit `e9459893` (the first cu133 build that fetches and ships
+nvtx3; same library sources as before). Full output attached as `TEST_RESULTS_gb10.log` on this
+release.
 
-Build timing, cold ccache for this toolkit: ninja wall 301 s, 269 timed units (summed unit time
-4,187 s), ccache 3 of 242 hits.
+Build timing, cold ccache for this toolkit: ninja wall 280 s, 252 timed units (summed unit time
+4,137 s), ccache 3 of 230 hits.
 
 ## Compatible cuVS
 
@@ -47,7 +59,7 @@ our paired, tested releases.
 
 | This RAFT release | cuVS release built and tested against it |
 |---|---|
-| this release | [`v26.12-gb10-cu133-gcc3a7a1b`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu133-gcc3a7a1b) (37/37 cuVS gtest binaries) |
+| this release | _pending: the matching cuVS cu133 release has not been rebuilt against this RAFT release yet (the published `v26.12-gb10-cu133-gcc3a7a1b` was built against the superseded `g680788c8`, which lacks nvtx3)_ |
 
 Use a cuVS build from the same 26.12 line with this RAFT. A cuVS built from a different RAPIDS
 version, or against a different CUDA toolkit than the one this RAFT was built with, is not covered
