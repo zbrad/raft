@@ -66,13 +66,7 @@ else
     fail "tarball sha256 does not match package-info.txt / CHECKSUMS"
   fi
   SHA_FILE="${TARBALL}.sha256"
-  if [[ ! -f "${SHA_FILE}" ]]; then
-    fail "${SHA_FILE} not found -- package again (package.sh writes the sha256 sidecar)"
-  elif (cd "$(dirname "${TARBALL}")" && sha256sum -c --quiet "$(basename "${SHA_FILE}")") >/dev/null 2>&1; then
-    ok "sha256 sidecar matches the tarball"
-  else
-    fail "sha256 sidecar does not match the tarball"
-  fi
+  if gpu_tuned_verify_sha256_sidecar "${TARBALL}"; then ok "sha256 sidecar matches the tarball"; else fail "sha256 sidecar missing or not matching the tarball (see above)"; fi
   if [[ -f "${TEST_RESULTS_FILE}" && "${TEST_RESULTS_FILE}" -nt "${TARBALL}" ]]; then
     fail "the test log is newer than the tarball; package again after testing"
   else

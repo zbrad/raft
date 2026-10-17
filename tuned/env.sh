@@ -58,21 +58,10 @@ source "${GPU_TUNED_SELF_DIR}/common.sh" || return 1 2>/dev/null || exit 1
 # any compilation happens at all).
 gpu_tuned_assert_platform "${GPU_TUNED_PLATFORM}" "${GPU_TUNED_VARIANT}" || return 1 2>/dev/null || exit 1
 
-# --- CUDA toolkit: chosen from tuned/common-data/toolkits, never inferred. CUDA_TAG (cu133) or
-#     CUDA_VER (13.3) select one; neither set is an error listing the defined ones. Exports
-#     CUDA_VER, CUDA_TAG, CUDA_HOME and puts $CUDA_HOME/bin on PATH. ---
-_raft_tk="${CUDA_TAG:-}"
-_raft_req_ver="${CUDA_VER:-}"
-if [ -z "${_raft_tk}" ] && [ -n "${_raft_req_ver}" ]; then
-    _raft_tk="cu${_raft_req_ver//./}"                           # 13.3 -> cu133
-fi
-gpu_tuned_load_toolkit "${GPU_TUNED_DATA_DIR}" "${GPU_TUNED_VARIANT}" "${_raft_tk}" || return 1 2>/dev/null || exit 1
-if [ -n "${_raft_req_ver}" ] && [ "${_raft_req_ver}" != "${TOOLKIT_CUDA_VER}" ]; then
-    echo "[tuned/env] ERROR: CUDA_VER=${_raft_req_ver} conflicts with toolkit ${CUDA_TAG} (CUDA ${TOOLKIT_CUDA_VER})." >&2
-    return 1 2>/dev/null || exit 1
-fi
-unset _raft_tk _raft_req_ver
-gpu_tuned_verify_toolkit || return 1 2>/dev/null || exit 1
+# --- CUDA toolkit: named by CUDA_TAG (cu133) or CUDA_VER (13.3), never defaulted or guessed; loaded from
+#     tuned/common-data/toolkits and verified (docs/ARCHITECTURE.md B4). Exports CUDA_VER, CUDA_TAG, CUDA_HOME
+#     and puts $CUDA_HOME/bin on PATH. ---
+gpu_tuned_select_toolkit "${GPU_TUNED_DATA_DIR}" "${GPU_TUNED_VARIANT}" || return 1 2>/dev/null || exit 1
 
 # raft's own names for the toolkit version, used throughout tuned/ and the wheel scripts.
 CUDA_VERSION="${CUDA_VER}"
