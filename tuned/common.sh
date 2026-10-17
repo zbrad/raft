@@ -1869,49 +1869,153 @@ gpu_tuned_ninja_timing() {
 # The mark inserted before ".so". One constant, so changing the convention is one edit.
 GPU_TUNED_SO_MARK="-tuned"
 
-# gpu_tuned_tuned_so_name <so-file-name> -- prints the tuned form of a shared-object file name:
+# gpu_tuned_tuned_so_name <so-file-name> [mark] -- prints the tuned form of a shared-object file name:
 # libggml.so.0.23.0 -> libggml-tuned.so.0.23.0, libllama-server-impl.so -> libllama-server-impl-tuned.so.
-# Idempotent (an already-marked name is unchanged). Fails on a name that is not lib*.so[.N...].
+# [mark] is the text inserted before ".so" and defaults to GPU_TUNED_SO_MARK ("-tuned", the generic form of
+# decisions/2026-10-15, superseded for shared objects by decisions/2026-10-17: pass the mark from
+# gpu_tuned_so_mark_for, "-<variant>-<toolkit>" with device code, "-<toolkit>" without). Idempotent (a name that
+# already ends in the mark is unchanged); a name carrying the legacy generic mark has it REPLACED, never stacked
+# (librmm-tuned.so + -cu133 -> librmm-cu133.so). Fails on a name that is not lib*.so[.N...].
 gpu_tuned_tuned_so_name() {
-    local n="${1:-}"
+    local n="${1:-}" mark="${2:-${GPU_TUNED_SO_MARK}}" base ver
     if [[ ! "${n}" =~ ^(lib.+)\.so((\.[0-9]+)*)$ ]]; then
         echo "ERROR: gpu_tuned_tuned_so_name: '${n}' is not a lib*.so[.N...] name." >&2
         return 1
     fi
-    if [[ "${BASH_REMATCH[1]}" == *"${GPU_TUNED_SO_MARK}" ]]; then
+    base="${BASH_REMATCH[1]}"; ver="${BASH_REMATCH[2]}"
+    if [[ "${base}" == *"${mark}" ]]; then
         printf '%s\n' "${n}"
-    else
-        printf '%s\n' "${BASH_REMATCH[1]}${GPU_TUNED_SO_MARK}.so${BASH_REMATCH[2]}"
+        return 0
     fi
+    if [[ "${mark}" != "${GPU_TUNED_SO_MARK}" && "${base}" == *"${GPU_TUNED_SO_MARK}" ]]; then
+        base="${base%"${GPU_TUNED_SO_MARK}"}"
+    fi
+    printf '%s\n' "${base}${mark}.so${ver}"
+}
+
+# gpu_tuned_so_has_device_code <elf> -- classify a shared object by what it CONTAINS, never by its NEEDED list or
+# its name: rc 0 if cuobjdump lists device code (a cubin or PTX), rc 1 if it reports "does not contain device
+# code", rc 2 (with a message) if it cannot tell (no such file, no cuobjdump, not an ELF). cuobjdump is
+# ${CUDA_HOME}/bin/cuobjdump when CUDA_HOME is set, else the one on PATH. A check that cannot run is a failure
+# for the callers, not a "no".
+gpu_tuned_so_has_device_code() {
+    local f="${1:-}" co out
+    [ -f "${f}" ] || { echo "ERROR: gpu_tuned_so_has_device_code: no such file: ${f}" >&2; return 2; }
+    co="${CUDA_HOME:+${CUDA_HOME}/bin/}cuobjdump"
+    command -v "${co}" >/dev/null 2>&1 || { echo "ERROR: gpu_tuned_so_has_device_code: cuobjdump not found (set CUDA_HOME); cannot classify ${f}." >&2; return 2; }
+    out="$({ "${co}" --list-elf "${f}"; "${co}" --list-ptx "${f}"; } 2>&1 || true)"
+    if printf '%s\n' "${out}" | grep -qE '^(ELF|PTX) file +[0-9]+:'; then return 0; fi
+    if printf '%s\n' "${out}" | grep -q 'does not contain device code'; then return 1; fi
+    echo "ERROR: gpu_tuned_so_has_device_code: cuobjdump could not classify ${f}: $(printf '%s' "${out}" | head -1)" >&2
+    return 2
+}
+
+# gpu_tuned_so_mark_for <elf> <variant> <toolkit> -- prints the mark a shared object must carry (docs/ARCHITECTURE.md
+# F1): "-<variant>-<toolkit>" if it has device code, "-<toolkit>" if not. <variant> is e.g. gb10, <toolkit> e.g. cu133.
+# rc 1 on a bad argument or when it cannot be classified.
+gpu_tuned_so_mark_for() {
+    local f="${1:-}" variant="${2:-}" tk="${3:-}" rc
+    if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ || ! "${tk}" =~ ^cu[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_so_mark_for: need <elf> <variant> <cuNNN>, got '${variant}' '${tk}'." >&2
+        return 1
+    fi
+    if gpu_tuned_so_has_device_code "${f}"; then rc=0; else rc=$?; fi
+    case "${rc}" in
+        0) printf -- '-%s-%s\n' "${variant}" "${tk}" ;;
+        1) printf -- '-%s\n' "${tk}" ;;
+        *) return 1 ;;
+    esac
+}
+
+# gpu_tuned_axes_manifest <stage-dir> <variant> <toolkit> <out-manifest> <name>... -- write a rename manifest for
+# gpu_tuned_rename_sonames / gpu_tuned_rename_package, one "<name> <mark>" line per <name>, the mark chosen by
+# gpu_tuned_so_mark_for from the file's contents. A name already renamed by an earlier run is classified from its
+# renamed file, so running it again writes the same manifest. Fails if a name is in neither form or cannot be classified.
+gpu_tuned_axes_manifest() {
+    local stage="${1:-}" variant="${2:-}" tk="${3:-}" out="${4:-}" name m f mark found
+    shift $(( $# < 4 ? $# : 4 ))
+    [ -d "${stage}" ] && [ -n "${out}" ] && [ "$#" -gt 0 ] || { echo "ERROR: gpu_tuned_axes_manifest: need <stage-dir> <variant> <toolkit> <out-manifest> <name>..." >&2; return 1; }
+    : > "${out}"
+    for name in "$@"; do
+        found=""
+        for m in "" "-${variant}-${tk}" "-${tk}" "${GPU_TUNED_SO_MARK}"; do
+            f="${stage}/${name}"
+            [ -z "${m}" ] || f="${stage}/$(gpu_tuned_tuned_so_name "${name}" "${m}")"
+            if [ -f "${f}" ]; then found="${f}"; break; fi
+        done
+        [ -n "${found}" ] || { echo "ERROR: gpu_tuned_axes_manifest: '${name}' is not in ${stage}." >&2; return 1; }
+        mark="$(gpu_tuned_so_mark_for "${found}" "${variant}" "${tk}")" || return 1
+        printf '%s %s\n' "${name}" "${mark}" >> "${out}"
+    done
+}
+
+# gpu_tuned_verify_so_axes <stage-dir> <variant> <toolkit> <system-manifest|-> [keep-regex] -- the F1 gate: every
+# shared object in <stage-dir> that is not a recorded system library or kept on purpose carries exactly the mark its
+# CONTENTS require, in its file name and in its SONAME: "-<variant>-<toolkit>" with device code, "-<toolkit>" without
+# (and a library without device code must not carry the variant). Prints every violation, returns 1 if any, and
+# also when a library cannot be classified (a check that cannot run is a failure).
+gpu_tuned_verify_so_axes() {
+    local stage="${1:-}" variant="${2:-}" tk="${3:-}" sysman="${4:--}" keep="${5:-}" f n soname mark base bad=0
+    declare -A sysnames=()
+    [ -d "${stage}" ] || { echo "ERROR: gpu_tuned_verify_so_axes: no such stage directory: ${stage}" >&2; return 1; }
+    if [ "${sysman}" != "-" ]; then
+        [ -f "${sysman}" ] || { echo "ERROR: gpu_tuned_verify_so_axes: no such system manifest: ${sysman}" >&2; return 1; }
+        while IFS= read -r n; do [ -n "${n}" ] && sysnames["${n}"]=1; done < "${sysman}"
+    fi
+    for f in "${stage}"/*; do
+        [ -f "${f}" ] && [ ! -L "${f}" ] || continue
+        n="$(basename "${f}")"
+        [[ "${n}" =~ ^lib.+\.so(\.[0-9]+)*$ ]] || continue
+        patchelf --print-needed "${f}" >/dev/null 2>&1 || continue                    # not an ELF
+        [ -z "${sysnames[${n}]:-}" ] || continue
+        if [ -n "${keep}" ] && [[ "${n}" =~ ${keep} ]]; then continue; fi
+        if ! mark="$(gpu_tuned_so_mark_for "${f}" "${variant}" "${tk}")"; then
+            echo "VIOLATION: ${n} cannot be classified, so its name cannot be checked." >&2; bad=1; continue
+        fi
+        [[ "${n}" =~ ^(lib.+)\.so(\.[0-9]+)*$ ]]; base="${BASH_REMATCH[1]}"
+        if [[ "${base}" != *"${mark}" ]]; then
+            echo "VIOLATION: ${n} must end in '${mark}' before .so ($([ "${mark}" = "-${tk}" ] && echo 'no device code: toolkit only' || echo 'it has device code: variant and toolkit'))." >&2; bad=1
+        elif [[ "${mark}" == "-${tk}" && "${base}" == *"-${variant}-${tk}" ]]; then
+            echo "VIOLATION: ${n} has no device code, so it must not carry the variant (expected '${mark}')." >&2; bad=1
+        fi
+        soname="$(patchelf --print-soname "${f}" 2>/dev/null || true)"
+        if [ -n "${soname}" ] && [[ ! "${soname}" =~ ^lib.+${mark}\.so(\.[0-9]+)*$ ]]; then
+            echo "VIOLATION: ${n} has SONAME '${soname}', which does not end in '${mark}' before .so." >&2; bad=1
+        fi
+    done
+    return "${bad}"
 }
 
 # gpu_tuned_rename_sonames <stage-dir> <manifest> [keep-regex] -- give the shared objects that
 # THIS build produced a unique identity. <manifest> lists, one per line, the file names in
 # <stage-dir> that are our own build output (select by provenance, never by name pattern: a
-# pattern misses whatever upstream adds next). Each is renamed to its tuned name and gets a
-# tuned SONAME; then the DT_NEEDED of every ELF in <stage-dir> that names a renamed file is
+# pattern misses whatever upstream adds next), each optionally followed by the mark it takes
+# ("libraft.so -cu133"; gpu_tuned_axes_manifest writes such lines, chosen by the library's contents) and
+# defaulting to GPU_TUNED_SO_MARK. Each is renamed to its tuned name and gets a tuned SONAME with the
+# same mark; then the DT_NEEDED of every ELF in <stage-dir> that names a renamed file is
 # rewritten, executables included. Names matching [keep-regex] are left alone (for builds that
 # load backends by filename; none today). Files not in the manifest (bundled system libraries
 # such as libnccl) are never touched. Idempotent. Run after RUNPATH is set; re-check any
 # build-info stamp (gpu_tuned_verify_build_info) afterwards, patchelf rewrites the files.
 # Prints "old -> new" per rename.
 gpu_tuned_rename_sonames() {
-    local stage="${1:-}" manifest="${2:-}" keep="${3:-}" name new f soname d
-    declare -A map=()
+    local stage="${1:-}" manifest="${2:-}" keep="${3:-}" name mark new f soname d
+    declare -A map=() marks=()
     if [ ! -d "${stage}" ] || [ ! -f "${manifest}" ]; then
         echo "ERROR: gpu_tuned_rename_sonames: need a stage directory and a manifest file." >&2
         return 1
     fi
     command -v patchelf >/dev/null 2>&1 || { echo "ERROR: gpu_tuned_rename_sonames: patchelf is not installed." >&2; return 1; }
-    while IFS= read -r name; do
+    while read -r name mark; do
         [ -n "${name}" ] || continue
         if [ -n "${keep}" ] && [[ "${name}" =~ ${keep} ]]; then continue; fi
-        if [ ! -f "${stage}/${name}" ] && [ ! -f "${stage}/$(gpu_tuned_tuned_so_name "${name}")" ]; then
+        new="$(gpu_tuned_tuned_so_name "${name}" "${mark}")" || return 1
+        if [ ! -f "${stage}/${name}" ] && [ ! -f "${stage}/${new}" ]; then
             echo "ERROR: gpu_tuned_rename_sonames: '${name}' is in the manifest but not in ${stage}." >&2
             return 1
         fi
-        new="$(gpu_tuned_tuned_so_name "${name}")" || return 1
         map["${name}"]="${new}"
+        marks["${name}"]="${mark}"
     done < "${manifest}"
     # pass 1: rename the files and give each a tuned SONAME
     for name in "${!map[@]}"; do
@@ -1927,7 +2031,7 @@ gpu_tuned_rename_sonames() {
         soname="$(patchelf --print-soname "${stage}/${new}" 2>/dev/null || true)"
         if [ -n "${soname}" ]; then
             if [ -n "${keep}" ] && [[ "${soname}" =~ ${keep} ]]; then continue; fi
-            patchelf --set-soname "$(gpu_tuned_tuned_so_name "${soname}")" "${stage}/${new}"
+            patchelf --set-soname "$(gpu_tuned_tuned_so_name "${soname}" "${marks[${name}]}")" "${stage}/${new}"
         fi
     done
     # pass 2: rewrite DT_NEEDED in every ELF in the stage
@@ -1944,21 +2048,24 @@ gpu_tuned_rename_sonames() {
 }
 
 # gpu_tuned_so_names_cmake <out-file> -- write the CMake include that gives the shared libraries of
-# a build unique "-tuned" identities AT BUILD TIME (OUTPUT_NAME <name>-tuned, so the file name, the
-# SONAME, every DT_NEEDED and the generated CMake export files all carry it), without editing any
-# upstream source. Pass it to CMake as
+# a build unique identities AT BUILD TIME (OUTPUT_NAME <name><mark>, so the file name, the SONAME, every
+# DT_NEEDED and the generated CMake export files all carry it), without editing any upstream source. Pass it
+# to CMake as
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=<out-file> "-DTUNED_SO_TARGETS=<target;target...>"
-# TUNED_SO_TARGETS names the CMake targets to mark (targets that are absent, imported or not shared
-# libraries are skipped; one already ending in -tuned is left alone). The marking runs deferred at
-# the end of the top-level directory, after fetched dependencies exist and before generation. The
-# mark is GPU_TUNED_SO_MARK. Writes the same bytes every time.
+# TUNED_SO_TARGETS names the CMake targets to mark with TUNED_SO_MARK (default GPU_TUNED_SO_MARK, the generic
+# "-tuned"). For the axis names of docs/ARCHITECTURE.md F1 pass the targets WITHOUT device code there with
+# "-DTUNED_SO_MARK=-<toolkit>" and the targets WITH device code in TUNED_SO_DEVICE_TARGETS with
+# "-DTUNED_SO_DEVICE_MARK=-<variant>-<toolkit>" (which list a target belongs in is decided by the caller from what
+# the library contains; gpu_tuned_verify_so_axes proves it afterwards). Targets that are absent, imported or not
+# shared libraries are skipped; one already ending in its mark is left alone. The marking runs deferred at the end
+# of the top-level directory, after fetched dependencies exist and before generation. Writes the same bytes every time.
 gpu_tuned_so_names_cmake() {
     local out="${1:-}"
     [ -n "${out}" ] || { echo "ERROR: gpu_tuned_so_names_cmake: need an output file." >&2; return 1; }
     cat > "${out}" <<CMAKE
 # Generated by gpu_tuned_so_names_cmake (tuned-common). Do not edit.
-function(tuned_mark_shared_libraries)
-  foreach(tgt IN LISTS TUNED_SO_TARGETS)
+function(tuned_mark_targets targets mark)
+  foreach(tgt IN LISTS targets)
     if(NOT TARGET \${tgt})
       continue()
     endif()
@@ -1971,11 +2078,21 @@ function(tuned_mark_shared_libraries)
     if(NOT _out)
       set(_out \${tgt})
     endif()
-    if(NOT _out MATCHES "${GPU_TUNED_SO_MARK}\$")
-      set_target_properties(\${tgt} PROPERTIES OUTPUT_NAME "\${_out}${GPU_TUNED_SO_MARK}")
+    if(NOT _out MATCHES "\${mark}\$")
+      set_target_properties(\${tgt} PROPERTIES OUTPUT_NAME "\${_out}\${mark}")
     endif()
-    message(STATUS "tuned: \${tgt} -> lib\${_out}${GPU_TUNED_SO_MARK}.so")
+    message(STATUS "tuned: \${tgt} -> lib\${_out}\${mark}.so")
   endforeach()
+endfunction()
+function(tuned_mark_shared_libraries)
+  if(NOT DEFINED TUNED_SO_MARK)
+    set(TUNED_SO_MARK "${GPU_TUNED_SO_MARK}")
+  endif()
+  if(NOT DEFINED TUNED_SO_DEVICE_MARK)
+    set(TUNED_SO_DEVICE_MARK "${GPU_TUNED_SO_MARK}")
+  endif()
+  tuned_mark_targets("\${TUNED_SO_TARGETS}" "\${TUNED_SO_MARK}")
+  tuned_mark_targets("\${TUNED_SO_DEVICE_TARGETS}" "\${TUNED_SO_DEVICE_MARK}")
 endfunction()
 cmake_language(DEFER DIRECTORY "\${CMAKE_SOURCE_DIR}" CALL tuned_mark_shared_libraries)
 CMAKE
@@ -2130,14 +2247,16 @@ gpu_tuned_verify_consumer_configure() {
 # Limit: only file names are rewritten (libfoo.so, -l:libfoo.so); a bare pkg-config `-lfoo` names no
 # file and is NOT repointed, so a package that ships such a reference needs it fixed by hand.
 gpu_tuned_rename_package() {
-    local stage="${1:-}" ours="${2:-}" sysman="${3:--}" keep="${4:-}" assume="${5:-}" name new d f bad=0
+    local stage="${1:-}" ours="${2:-}" sysman="${3:--}" keep="${4:-}" assume="${5:-}" name mark new d f bad=0
     shift $(( $# < 5 ? $# : 5 ))
     gpu_tuned_rename_sonames "${stage}" "${ours}" "${keep}" | sed 's/^/  /'
     [ "${PIPESTATUS[0]}" -eq 0 ] || return 1
-    while IFS= read -r name; do
+    declare -A seen_marks=()
+    while read -r name mark; do
         [ -n "${name}" ] || continue
         if [ -n "${keep}" ] && [[ "${name}" =~ ${keep} ]]; then continue; fi
-        new="$(gpu_tuned_tuned_so_name "${name}")" || return 1
+        seen_marks["${mark:-${GPU_TUNED_SO_MARK}}"]=1
+        new="$(gpu_tuned_tuned_so_name "${name}" "${mark}")" || return 1
         [ "${name}" != "${new}" ] || continue
         for d in "$@"; do
             [ -d "${d}" ] || continue
@@ -2151,7 +2270,12 @@ gpu_tuned_rename_package() {
         done
     done < "${ours}"
     [ "${bad}" -eq 0 ] || return 1
-    gpu_tuned_verify_unique_sonames "${stage}" "${sysman}" "${keep}" "${assume}"
+    # the gate accepts exactly the marks this manifest used (an empty manifest falls back to the generic mark)
+    local markre="" m
+    for m in "${!seen_marks[@]}"; do
+        markre+="${markre:+|}$(printf '%s' "${m}" | sed 's/[][\\.*^$+?(){}|]/\\&/g')"
+    done
+    gpu_tuned_verify_unique_sonames "${stage}" "${sysman}" "${keep}" "${assume}" "${markre}"
 }
 
 # gpu_tuned_verify_unique_sonames <stage-dir> <system-manifest|-> [keep-regex] [assume-present-regex]
@@ -2163,7 +2287,10 @@ gpu_tuned_rename_package() {
 # stage or match [assume-present-regex] (glibc, the driver, the CUDA toolkit...), and a needed name
 # carrying the mark must exist in the stage. Prints every violation, returns 1 if any.
 gpu_tuned_verify_unique_sonames() {
-    local stage="${1:-}" sysman="${2:--}" keep="${3:-}" assume="${4:-}" f n soname d bad=0
+    local stage="${1:-}" sysman="${2:--}" keep="${3:-}" assume="${4:-}" markre="${5:-${GPU_TUNED_SO_MARK_RE:-}}" f n soname d bad=0
+    # the acceptable mark(s), as an ERE; default is the generic GPU_TUNED_SO_MARK. For the axis names of
+    # F1 pass e.g. '-(gb10-)?cu133' (and use gpu_tuned_verify_so_axes for the exact device-code check).
+    [ -n "${markre}" ] || markre="$(printf '%s' "${GPU_TUNED_SO_MARK}" | sed 's/[][\\.*^$+?(){}|]/\\&/g')"
     declare -A sysnames=()
     if [ ! -d "${stage}" ]; then echo "ERROR: gpu_tuned_verify_unique_sonames: no such stage directory: ${stage}" >&2; return 1; fi
     if [ "${sysman}" != "-" ]; then
@@ -2180,8 +2307,8 @@ gpu_tuned_verify_unique_sonames() {
                 :                                                             # bundled system library, recorded
             elif [ -n "${keep}" ] && [[ "${n}" =~ ${keep} ]]; then
                 :                                                             # kept on purpose
-            elif [[ "${n}" == *"${GPU_TUNED_SO_MARK}.so"* ]]; then
-                if [ -n "${soname}" ] && [[ "${soname}" != *"${GPU_TUNED_SO_MARK}.so"* ]]; then
+            elif [[ "${n}" =~ (${markre})\.so ]]; then
+                if [ -n "${soname}" ] && [[ ! "${soname}" =~ (${markre})\.so ]]; then
                     echo "VIOLATION: ${n} is renamed but its SONAME is '${soname}'." >&2; bad=1
                 fi
             else
@@ -2191,7 +2318,7 @@ gpu_tuned_verify_unique_sonames() {
         while IFS= read -r d; do
             [ -n "${d}" ] || continue
             if [ -e "${stage}/${d}" ]; then continue; fi
-            if [[ "${d}" == *"${GPU_TUNED_SO_MARK}.so"* ]]; then
+            if [[ "${d}" =~ (${markre})\.so ]]; then
                 echo "VIOLATION: ${n} needs ${d}, which is not in the stage." >&2; bad=1
             elif [ -n "${assume}" ] && [[ "${d}" =~ ${assume} ]]; then
                 continue
@@ -2386,6 +2513,69 @@ gpu_tuned_verify_cccl_toolkit_match() {
         return 0
     fi
     echo "OK: ${pkg_name} resolved to CUDA ${found_ver}, matches this build's CUDA ${expected_cuda_ver}"
+}
+
+# --- helpers that three or four consumers had copied (docs/ARCHITECTURE.md A7) -------------------------------
+
+# gpu_tuned_write_sha256_sidecar <tarball> -- write <tarball>.sha256 in sha256sum format (digest, two spaces, the
+# file's base name, so `sha256sum -c` works from the tarball's directory) and check it straight away. H1/I3: the
+# release attaches it. Prints the sidecar's base name. rc 1 on any failure.
+gpu_tuned_write_sha256_sidecar() {
+    local t="${1:-}" side
+    [ -f "${t}" ] || { echo "ERROR: gpu_tuned_write_sha256_sidecar: no such file: ${t:-<none>}" >&2; return 1; }
+    side="${t}.sha256"
+    (cd "$(dirname "${t}")" && sha256sum "$(basename "${t}")" > "$(basename "${side}")") || return 1
+    gpu_tuned_verify_sha256_sidecar "${t}" || return 1
+    echo "Checksum: $(basename "${side}")"
+}
+
+# gpu_tuned_verify_sha256_sidecar <tarball> -- rc 0 if <tarball>.sha256 exists and matches the tarball; rc 1 with a
+# message naming the cause (missing sidecar, mismatch) otherwise. Quiet on success.
+gpu_tuned_verify_sha256_sidecar() {
+    local t="${1:-}" side
+    [ -f "${t}" ] || { echo "ERROR: gpu_tuned_verify_sha256_sidecar: no such file: ${t:-<none>}" >&2; return 1; }
+    side="${t}.sha256"
+    [ -f "${side}" ] || { echo "ERROR: ${side} not found -- package again (package.sh writes the sha256 sidecar)." >&2; return 1; }
+    (cd "$(dirname "${t}")" && sha256sum -c --quiet "$(basename "${side}")") >/dev/null 2>&1 \
+        || { echo "ERROR: ${side} does not match $(basename "${t}")." >&2; return 1; }
+}
+
+# gpu_tuned_select_toolkit <data-dir> <variant> -- the toolkit-selection block every tuned env.sh had: the toolkit
+# is named (never defaulted or guessed) by CUDA_TAG (cu133) or CUDA_VER (13.3), loaded from <data-dir>/toolkits,
+# checked for a tag/version conflict, and verified (gpu_tuned_load_toolkit, gpu_tuned_verify_toolkit). A repo with
+# its own variable names sets GPU_TUNED_TOOLKIT_ENV_PREFIX (faiss: FAISS_), which is consulted first
+# (FAISS_CUDA_TAG, FAISS_CUDA_VER), then CUDA_TAG / CUDA_VER. Exports what gpu_tuned_load_toolkit does. rc 1 loudly.
+gpu_tuned_select_toolkit() {
+    local data="${1:-}" variant="${2:-}" pre="${GPU_TUNED_TOOLKIT_ENV_PREFIX:-}" tk="" ver="" tag_var ver_var
+    tag_var="${pre}CUDA_TAG"; ver_var="${pre}CUDA_VER"
+    tk="${!tag_var:-${CUDA_TAG:-}}"
+    ver="${!ver_var:-${CUDA_VER:-}}"
+    if [ -z "${tk}" ] && [ -n "${ver}" ]; then tk="cu${ver//./}"; fi          # 13.3 -> cu133
+    gpu_tuned_load_toolkit "${data}" "${variant}" "${tk}" || return 1
+    if [ -n "${ver}" ] && [ "${ver}" != "${TOOLKIT_CUDA_VER}" ]; then
+        echo "[tuned/env] ERROR: CUDA version ${ver} conflicts with toolkit ${CUDA_TAG} (CUDA ${TOOLKIT_CUDA_VER})." >&2
+        return 1
+    fi
+    gpu_tuned_verify_toolkit || return 1
+}
+
+# gpu_tuned_stamp_lib_json <elf> <package> <release-tag> [legacy-section] [name=value...] -- stamp a staged shared
+# object with the JSON build info the way every native packager does (H7): remove the build-time free-text section
+# [legacy-section] (e.g. .faiss_build_info) if one is given, embed .tuned_build_info with the standard fields from the
+# environment (GPU_TUNED_VARIANT/HW_LABEL/CUDA_ARCH, CUDA_TAG/CUDA_VER, the toolkit's nvcc version) plus any extra
+# name=value fields (deps.*), then verify release, variant and cuda.tag read back. Run after the last rewrite of the
+# file (patchelf drops nothing, but re-verify with gpu_tuned_verify_build_info_json after a rename). rc 1 loudly.
+gpu_tuned_stamp_lib_json() {
+    local elf="${1:-}" package="${2:-}" release="${3:-}" legacy="${4:-}" nvcc_full
+    shift $(( $# < 4 ? $# : 4 ))
+    [ -f "${elf}" ] && [ -n "${package}" ] && [ -n "${release}" ] || { echo "ERROR: gpu_tuned_stamp_lib_json: need <elf> <package> <release-tag> [legacy-section] [name=value...]" >&2; return 1; }
+    [ -z "${legacy}" ] || objcopy --remove-section "${legacy}" "${elf}" || return 1
+    nvcc_full="$("${CUDA_HOME}/bin/nvcc" --version 2>/dev/null | sed -n 's/.*release [0-9.]*, V\([0-9.]*\).*/\1/p' | head -1)"
+    gpu_tuned_embed_build_info_json "${elf}" \
+        "package=${package}" "component=$(basename "${elf}")" "release=${release}" "variant=${GPU_TUNED_VARIANT}" \
+        "hardware=${GPU_TUNED_HW_LABEL}" "arch=sm_${GPU_TUNED_CUDA_ARCH}" \
+        "cuda.tag=${CUDA_TAG}" "cuda.version=${CUDA_VER}" "cuda.nvcc=${nvcc_full:-unknown}" "$@" || return 1
+    gpu_tuned_verify_build_info_json "${elf}" "release=${release}" "variant=${GPU_TUNED_VARIANT}" "cuda.tag=${CUDA_TAG}"
 }
 
 if [[ -z "${GPU_TUNED_NO_ERR_TRAP:-}" && -z "$(trap -p ERR)" ]]; then
