@@ -65,6 +65,14 @@ else
   else
     fail "tarball sha256 does not match package-info.txt / CHECKSUMS"
   fi
+  SHA_FILE="${TARBALL}.sha256"
+  if [[ ! -f "${SHA_FILE}" ]]; then
+    fail "${SHA_FILE} not found -- package again (package.sh writes the sha256 sidecar)"
+  elif (cd "$(dirname "${TARBALL}")" && sha256sum -c --quiet "$(basename "${SHA_FILE}")") >/dev/null 2>&1; then
+    ok "sha256 sidecar matches the tarball"
+  else
+    fail "sha256 sidecar does not match the tarball"
+  fi
   if [[ -f "${TEST_RESULTS_FILE}" && "${TEST_RESULTS_FILE}" -nt "${TARBALL}" ]]; then
     fail "the test log is newer than the tarball; package again after testing"
   else
@@ -113,6 +121,7 @@ gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" \
   "RAFT ${SHORT_VER} — ${RAFT_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${RELEASE_TAG#v})" \
   "@${RELEASE_NOTES_FILE}" \
   "${TARBALL}#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${RAFT_DEVICE_LABEL})" \
+  "${SHA_FILE}#SHA-256 checksum" \
   "${RELEASES_DIR}/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
   "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})" \
   "${SMOKE_FILE}#Package smoke test results (${GPU_TUNED_VARIANT})"

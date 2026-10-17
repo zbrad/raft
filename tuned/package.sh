@@ -71,14 +71,17 @@ cp -r "${INSTALL_DIR}" "${PKG_DIR}"
 # build-info stamp until now.
 if [[ -f "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" ]]; then
     gpu_tuned_verify_arch "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
-    embed_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_VARIANT}" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "${GPU_TUNED_HW_LABEL}"
-    # Confirm the stamp actually landed before archiving -- the tarball is
-    # a straight `tar -cjf` of PKG_DIR below with no further build/install
-    # pass, so this should always pass, but every other repo in this
-    # fleet validates its stamp right after writing it rather than
-    # assuming (embed_build_info's wrapper here pins the section name to
-    # "raft_build_info" regardless of package -- see its definition).
-    gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
+    # The build-tree stamp (.raft_build_info, "@ <sha>") is the H6 anchor read above; it is internal and
+    # is dropped from the shipped copy, which carries the JSON build info (.tuned_build_info) instead.
+    objcopy --remove-section .raft_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" || exit 1
+    _nvcc_full="$("${CUDA_HOME}/bin/nvcc" --version | sed -n 's/.*release [0-9.]*, V\([0-9.]*\).*/\1/p' | head -1)"
+    gpu_tuned_embed_build_info_json "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" \
+        package=raft "component=lib${RAFT_LIB_NAME}.so" "release=${RELEASE_TAG}" "variant=${GPU_TUNED_VARIANT}" \
+        "hardware=${GPU_TUNED_HW_LABEL}" "arch=sm_${GPU_TUNED_CUDA_ARCH}" \
+        "cuda.tag=${CUDA_TAG}" "cuda.version=${CUDA_VER}" "cuda.nvcc=${_nvcc_full:-unknown}" || exit 1
+    unset _nvcc_full
+    # Confirm the stamp actually landed before archiving (the tarball is a straight `tar -cjf` of PKG_DIR).
+    gpu_tuned_verify_build_info_json "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "release=${RELEASE_TAG}" "variant=${GPU_TUNED_VARIANT}" "cuda.tag=${CUDA_TAG}" || exit 1
 fi
 
 # Unique shared-object identities for the rapids chain this tree ships. librmm.so and
@@ -105,7 +108,7 @@ gpu_tuned_rename_package "${PKG_DIR}/lib" "${OURS_MANIFEST}" - "${KEEP_RE}" \
     "${PKG_DIR}/lib/cmake" "${PKG_DIR}/lib/pkgconfig" || { rm -f "${OURS_MANIFEST}"; exit 1; }
 rm -f "${OURS_MANIFEST}"
 # patchelf rewrote the files; the build-info stamp on the raft lib must have survived
-gpu_tuned_verify_build_info "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "${RAFT_LIB_NAME}" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "raft_build_info" || exit 1
+gpu_tuned_verify_build_info_json "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "release=${RELEASE_TAG}" "variant=${GPU_TUNED_VARIANT}" "cuda.tag=${CUDA_TAG}" || exit 1
 
 # Self-containment gates. A package whose installed CMake files ask for nvtx3 must ship it (config and
 # headers): found in a pip wheel instead of fetched, it is silently left out and consumers (faiss) fail
@@ -123,6 +126,12 @@ mkdir -p "${DIST_DIR}"
 cd /tmp
 tar -cjf "${OUT}" "${PKG_NAME}"
 echo "Created: ${OUT}"
+
+# sha256sum-format sidecar (digest + file name), attached to the release so a consumer can verify the download.
+SHA_FILE="${OUT}.sha256"
+(cd "${DIST_DIR}" && sha256sum "$(basename "${OUT}")" > "$(basename "${SHA_FILE}")")
+(cd "${DIST_DIR}" && sha256sum -c --quiet "$(basename "${SHA_FILE}")") || { echo "ERROR: the sha256 sidecar does not match the tarball" >&2; exit 1; }
+echo "Checksum: $(basename "${SHA_FILE}")"
 
 SHA256=$(sha256sum "${OUT}" | awk '{print $1}')
 MD5=$(md5sum "${OUT}" | awk '{print $1}')
