@@ -199,51 +199,61 @@ gpu_tuned_verify_cccl_version() {
     echo "OK: CCCL ${found_major}.${found_minor}.${found_patch} meets the minimum required version (${min_version})"
 }
 
-# gpu_tuned_load_toolkit <data-dir> <variant> [<toolkit-id>] — selects a CUDA
+# gpu_tuned_load_toolkit <data-dir> <variant> <toolkit-id> — selects a CUDA
 # toolkit from <data-dir>/toolkits/<toolkit-id>.env (e.g. cu133), then
 # sources the optional <data-dir>/toolkits/<variant>-<toolkit-id>.env, which
-# overrides any key. With no id it uses the highest defined toolkit (by its
-# declared TOOLKIT_CUDA_VER, not by file name) and says so on stderr, naming
-# the whole list and the reason. It only ever picks from the toolkit files,
-# never from /usr/local/cuda or from what happens to be installed. An unknown
-# id is an error that lists the available ones, and an already-set CUDA_HOME
-# that differs from the toolkit's is rejected rather than trusted. Exports
-# CUDA_VER, CUDA_TAG, CUDA_HOME, GPU_TUNED_TOOLKIT_LIB_DIR (the toolkit's own
-# targets/<arch>-linux/lib, from GPU_TUNED_PLATFORM when set, else uname -m)
-# and prepends $CUDA_HOME/bin to PATH. It does not check the install: call
-# gpu_tuned_verify_toolkit for that.
+# overrides any key. The toolkit is always one that was named: there is no
+# default and no "highest defined" or "newest installed" guess, so a build can
+# never silently use a toolkit nobody chose. With no id it is an error that
+# lists the defined toolkits (with their CUDA version and whether the install
+# is present) and says how to name one (CUDA_TAG or CUDA_VER). Only when both
+# stdin and stderr are a terminal does it instead ask which of the listed
+# toolkits to use, for this run only; it still never picks one itself, and a
+# script, pipe or CI run (no terminal) gets the error. An unknown id is an
+# error that lists the defined toolkits too, and an already-set CUDA_HOME that
+# differs from the toolkit's is rejected rather than trusted. It only ever
+# reads the toolkit files, never /usr/local/cuda or what happens to be
+# installed. Exports CUDA_VER, CUDA_TAG, CUDA_HOME, GPU_TUNED_TOOLKIT_LIB_DIR
+# (the toolkit's own targets/<arch>-linux/lib, from GPU_TUNED_PLATFORM when
+# set, else uname -m) and prepends $CUDA_HOME/bin to PATH. It does not check
+# the install: call gpu_tuned_verify_toolkit for that.
 gpu_tuned_load_toolkit() {
     local data_dir="$1" variant="$2" tk="${3:-}"
     if [[ -z "${tk}" ]]; then
-        local f v listing="" best="" best_v=""
+        local f id v home listing="" ids=() n
         for f in "${data_dir}"/toolkits/*.env; do
             [[ -f "${f}" ]] || continue
-            [[ "$(basename "${f}" .env)" == "${variant}-"* ]] && continue   # per-variant override file
+            id="$(basename "${f}" .env)"
+            [[ "${id}" == "${variant}-"* ]] && continue   # per-variant override file
             v="$(sed -n 's/^TOOLKIT_CUDA_VER="\(.*\)"$/\1/p' "${f}" | head -1)"
-            listing+=" $(basename "${f}" .env)(${v:-?})"
-            if [[ -n "${v}" && ( -z "${best_v}" || "$(printf '%s\n%s\n' "${best_v}" "${v}" | sort -V | tail -1)" == "${v}" ) ]]; then
-                best="$(basename "${f}" .env)"; best_v="${v}"
-            fi
+            ids+=("${id}")
+            listing+=" ${id}(${v:-?})"
         done
-        if [[ -z "${best}" ]]; then
-            echo "ERROR: gpu_tuned_load_toolkit: no toolkit given and none defined under ${data_dir}/toolkits" >&2
-            return 1
-        fi
-        echo "[toolkit] available:${listing}" >&2
-        local dflt=""
-        if [[ -f "${data_dir}/toolkits/DEFAULT" ]]; then
-            dflt="$(tr -d '[:space:]' < "${data_dir}/toolkits/DEFAULT")"
-            if [[ ! -f "${data_dir}/toolkits/${dflt}.env" ]]; then
-                echo "ERROR: gpu_tuned_load_toolkit: ${data_dir}/toolkits/DEFAULT names '${dflt}', which has no toolkits/${dflt}.env." >&2
+        if [[ -t 0 && -t 2 && ${#ids[@]} -gt 0 ]]; then
+            echo "No toolkit was specified. Defined toolkits (set CUDA_TAG or CUDA_VER to skip this question):" >&2
+            n=0
+            for id in "${ids[@]}"; do
+                n=$((n + 1))
+                v="$(sed -n 's/^TOOLKIT_CUDA_VER="\(.*\)"$/\1/p' "${data_dir}/toolkits/${id}.env" | head -1)"
+                home="$(sed -n 's/^TOOLKIT_CUDA_HOME="\(.*\)"$/\1/p' "${data_dir}/toolkits/${id}.env" | head -1)"
+                printf '  %d) %s  CUDA %s  %s\n' "${n}" "${id}" "${v:-?}" "$([[ -d "${home}" ]] && echo "installed at ${home}" || echo "NOT installed (${home})")" >&2
+            done
+            local answer
+            read -r -p "Use which toolkit (number or id, empty to cancel)? " answer </dev/stdin || answer=""
+            if [[ "${answer}" =~ ^[0-9]+$ && "${answer}" -ge 1 && "${answer}" -le ${#ids[@]} ]]; then
+                tk="${ids[$((answer - 1))]}"
+            else
+                for id in "${ids[@]}"; do [[ "${answer}" == "${id}" ]] && tk="${id}"; done
+            fi
+            if [[ -z "${tk}" ]]; then
+                echo "ERROR: gpu_tuned_load_toolkit: no toolkit chosen ('${answer}')." >&2
                 return 1
             fi
-            echo "[toolkit] using ${dflt}: none was specified, so the default named in toolkits/DEFAULT is used (highest defined is ${best})." >&2
-            echo "[toolkit] to choose another, set CUDA_TAG (e.g. CUDA_TAG=${best}) or CUDA_VER." >&2
-            tk="${dflt}"
+            echo "[toolkit] using ${tk}: chosen at the prompt for this run; set CUDA_TAG=${tk} to skip the question." >&2
         else
-            echo "[toolkit] using ${best} (CUDA ${best_v}): none was specified, so the highest defined toolkit is used." >&2
-            echo "[toolkit] to choose another, set CUDA_TAG (e.g. CUDA_TAG=${best}) or CUDA_VER." >&2
-            tk="${best}"
+            echo "ERROR: gpu_tuned_load_toolkit: no toolkit specified. The toolkit is never defaulted or guessed: name it with CUDA_TAG (e.g. CUDA_TAG=cu133) or CUDA_VER (e.g. CUDA_VER=13.3)." >&2
+            echo "       available toolkits:${listing:- (none defined under ${data_dir}/toolkits)}" >&2
+            return 1
         fi
     fi
     local base="${data_dir}/toolkits/${tk}.env"
@@ -316,7 +326,7 @@ gpu_tuned_verify_toolkit() {
         echo "ERROR: gpu_tuned_verify_toolkit: ${CUDA_HOME}/bin/nvcc reports release '${found}', toolkit ${TOOLKIT_ID} declares ${TOOLKIT_NVCC_RELEASE}." >&2
         return 1
     fi
-    if [[ -n "${TOOLKIT_NCCL_VERSION:-}" ]]; then
+    if [[ -n "${TOOLKIT_NCCL_VERSION:-}" && "${TOOLKIT_NCCL_VERSION}" != none ]]; then
         if ! command -v dpkg-query >/dev/null 2>&1; then
             echo "WARNING: gpu_tuned_verify_toolkit: dpkg-query not found; NCCL ${TOOLKIT_NCCL_VERSION} not checked." >&2
         else
@@ -328,7 +338,11 @@ gpu_tuned_verify_toolkit() {
             fi
         fi
     fi
-    echo "OK: toolkit ${TOOLKIT_ID}: nvcc ${found} at ${CUDA_HOME}${TOOLKIT_NCCL_VERSION:+, libnccl2 ${TOOLKIT_NCCL_VERSION}}"
+    if [[ "${TOOLKIT_NCCL_VERSION:-}" == none ]]; then
+        echo "OK: toolkit ${TOOLKIT_ID}: nvcc ${found} at ${CUDA_HOME}, no system NCCL (a pinned zbrad/nccl release is the only NCCL)"
+    else
+        echo "OK: toolkit ${TOOLKIT_ID}: nvcc ${found} at ${CUDA_HOME}${TOOLKIT_NCCL_VERSION:+, libnccl2 ${TOOLKIT_NCCL_VERSION}}"
+    fi
 }
 
 # gpu_tuned_verify_toolkit_libs <elf>... — resolves each file's libraries
@@ -853,6 +867,252 @@ gpu_tuned_require_clean_tree() {
     echo "OK: clean tracked tree at ${top} ($(git rev-parse --short HEAD 2>/dev/null || echo '?'))"
 }
 
+# --- JSON build-info stamp (docs/ARCHITECTURE.md, "Build info") -------------------------------------
+# One line of strict JSON in the fixed ELF section .tuned_build_info, readable with
+#   gpu_tuned_read_build_info <file> | jq .      (or: readelf -p .tuned_build_info <file>)
+# It replaces the free-text stamp of gpu_tuned_embed_build_info, which stays for repos that have not
+# moved. Fields are given as name=value arguments: a dotted name nests (fork.url=... puts "url" in the
+# "fork" object), a :int, :bool or :null suffix on the name sets the JSON type (everything else is a
+# string). The writer is python3's json module, so quoting and escaping are never hand-built.
+
+# gpu_tuned_build_info_json [name[:type]=value]... -- prints the JSON object, "schema" first. Fails loudly
+# on a bad name, a bad int or bool, a duplicate, or a name that is both a value and a parent.
+gpu_tuned_build_info_json() {
+    command -v python3 >/dev/null || { echo "ERROR: gpu_tuned_build_info_json: python3 is required." >&2; return 1; }
+    python3 - "$@" <<'PY'
+import json, re, sys
+KEY = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
+obj = {"schema": "tuned-build-info/1"}
+seen = set()
+for arg in sys.argv[1:]:
+    name, sep, value = arg.partition("=")
+    if not sep:
+        sys.exit("ERROR: gpu_tuned_build_info_json: '%s' is not name=value." % arg)
+    typ = "str"
+    if ":" in name:
+        name, typ = name.rsplit(":", 1)
+    if typ not in ("str", "int", "bool", "null") or not KEY.match(name):
+        sys.exit("ERROR: gpu_tuned_build_info_json: bad field name or type in '%s'." % arg)
+    if typ == "int":
+        if not re.fullmatch(r"0|[1-9][0-9]*", value):
+            sys.exit("ERROR: gpu_tuned_build_info_json: %s is not a canonical integer: '%s'." % (name, value))
+        value = int(value)
+    elif typ == "bool":
+        if value not in ("true", "false"):
+            sys.exit("ERROR: gpu_tuned_build_info_json: %s must be true or false, got '%s'." % (name, value))
+        value = (value == "true")
+    elif typ == "null":
+        value = None
+    if re.search(r"[\x00-\x1f]", str(value) if value is not None else ""):
+        sys.exit("ERROR: gpu_tuned_build_info_json: %s contains a control character." % name)
+    parts = name.split(".")
+    node = obj
+    for i, part in enumerate(parts[:-1]):
+        child = node.setdefault(part, {})
+        if not isinstance(child, dict):
+            sys.exit("ERROR: gpu_tuned_build_info_json: %s is both a value and a parent." % ".".join(parts[: i + 1]))
+        node = child
+    if parts[-1] in node:
+        sys.exit("ERROR: gpu_tuned_build_info_json: duplicate or conflicting field %s." % name)
+    node[parts[-1]] = value
+print(json.dumps(obj, ensure_ascii=True, separators=(",", ":")))
+PY
+}
+
+# gpu_tuned__git_info_fields -- name=value lines describing the checkout: fork.url, fork.commit (40 hex),
+# fork.dirty, fork.commit_count (a repo-relative count, information only: never an identity), and, when an
+# `upstream` remote exists, upstream.url, upstream.ref (GPU_TUNED_UPSTREAM_REF, else upstream/HEAD, else null),
+# upstream.base (merge-base with the ref) and upstream.nearest_tag ("<tag>+<distance>"). Never fetches, never
+# fails: a non-git directory yields no fields.
+gpu_tuned__git_info_fields() {
+    local sha url count up_url up_ref base nearest dist
+    sha="$(git rev-parse HEAD 2>/dev/null)" || return 0
+    url="$(gpu_tuned_public_repo_url "${1:-$(git remote get-url origin 2>/dev/null || true)}")"
+    count="$(git rev-list --count HEAD 2>/dev/null || true)"
+    printf 'fork.url=%s\n' "${url:-unknown}"
+    printf 'fork.commit=%s\n' "${sha}"
+    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then printf 'fork.dirty:bool=true\n'; else printf 'fork.dirty:bool=false\n'; fi
+    [ -z "${count}" ] || printf 'fork.commit_count:int=%s\n' "${count}"
+    up_url="$(git remote get-url upstream 2>/dev/null)" || return 0
+    printf 'upstream.url=%s\n' "$(gpu_tuned_public_repo_url "${up_url}")"
+    up_ref="${GPU_TUNED_UPSTREAM_REF:-}"
+    [ -n "${up_ref}" ] || up_ref="$(git symbolic-ref -q --short refs/remotes/upstream/HEAD 2>/dev/null || true)"
+    if [ -z "${up_ref}" ]; then printf 'upstream.ref:null=\n'; return 0; fi
+    printf 'upstream.ref=%s\n' "${up_ref}"
+    base="$(git merge-base HEAD "${up_ref}" 2>/dev/null)" || return 0
+    printf 'upstream.base=%s\n' "${base}"
+    nearest="$(git describe --tags --abbrev=0 --exclude 'tuning-*' "${base}" 2>/dev/null || true)"
+    if [ -n "${nearest}" ]; then
+        dist="$(git rev-list --count "refs/tags/${nearest}..${base}" 2>/dev/null || true)"
+        printf 'upstream.nearest_tag=%s+%s\n' "${nearest}" "${dist:-0}"
+    fi
+}
+
+# gpu_tuned_embed_build_info_json <elf> [name[:type]=value]... -- stamps <elf> with the JSON object built from
+# the arguments plus the checkout's git fields and a UTC "built" time (arguments win over the automatic
+# fields). Replaces any earlier .tuned_build_info section, so it is idempotent. A caller-given field
+# `fork.url=` overrides the origin URL. Run it from inside the repo, like the older stamp.
+gpu_tuned_embed_build_info_json() {
+    local target="${1:-}" tmp json line auto=() given=() a name
+    shift || true
+    [ -f "${target}" ] || { echo "ERROR: gpu_tuned_embed_build_info_json: ${target:-<none>} is not a file." >&2; return 1; }
+    for a in "$@"; do given+=("${a}"); done
+    while IFS= read -r line; do
+        [ -n "${line}" ] || continue
+        name="${line%%=*}"; name="${name%%:*}"
+        for a in "${given[@]+"${given[@]}"}"; do [ "${a%%[:=]*}" = "${name}" ] && continue 2; done
+        auto+=("${line}")
+    done < <(gpu_tuned__git_info_fields)
+    json="$(gpu_tuned_build_info_json "${given[@]+"${given[@]}"}" "${auto[@]+"${auto[@]}"}" "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)")" || return 1
+    tmp="$(mktemp)"
+    printf '%s\n' "${json}" > "${tmp}"
+    objcopy --remove-section .tuned_build_info "${target}" 2>/dev/null || true
+    objcopy --add-section .tuned_build_info="${tmp}" "${target}" || { rm -f "${tmp}"; return 1; }
+    rm -f "${tmp}"
+}
+
+# gpu_tuned_read_build_info <elf> -- prints the build info as one line of JSON. Reads .tuned_build_info when
+# present; otherwise a legacy free-text <name>_build_info section is wrapped as {"schema":"text","section":
+# "...","text":"..."} so old artifacts stay readable by the same tooling. Returns 1 with a message if the file
+# carries neither. Reads the ELF section table itself (little-endian ELF64, which every target here is),
+# never rewrites the file, and needs only python3.
+gpu_tuned_read_build_info() {
+    local file="${1:-}"
+    [ -f "${file}" ] || { echo "ERROR: gpu_tuned_read_build_info: ${file:-<none>} is not a file." >&2; return 1; }
+    python3 - "${file}" <<'PY'
+import json, struct, sys
+path = sys.argv[1]
+data = open(path, "rb").read()
+if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+    sys.exit("ERROR: gpu_tuned_read_build_info: %s is not a little-endian ELF64 file." % path)
+shoff, = struct.unpack_from("<Q", data, 0x28)
+shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+secs = []
+for i in range(shnum):
+    name, typ, flags, addr, off, size = struct.unpack_from("<IIQQQQ", data, shoff + i * shentsize)
+    secs.append((name, typ, off, size))
+stroff = secs[shstrndx][2]
+def sname(n):
+    end = data.index(b"\0", stroff + n)
+    return data[stroff + n:end].decode("ascii", "replace")
+found = {sname(n): (off, size) for n, typ, off, size in secs if typ != 0}
+if ".tuned_build_info" in found:
+    off, size = found[".tuned_build_info"]
+    text = data[off:off + size].decode("utf-8").rstrip("\0\n")
+    json.loads(text)
+    print(text)
+    sys.exit(0)
+for name in sorted(found):
+    if name.endswith("_build_info"):
+        off, size = found[name]
+        print(json.dumps({"schema": "text", "section": name, "text": data[off:off + size].decode("utf-8", "replace").rstrip("\0\n")}, separators=(",", ":")))
+        sys.exit(0)
+sys.exit("ERROR: gpu_tuned_read_build_info: %s has no .tuned_build_info (or legacy *_build_info) section." % path)
+PY
+}
+
+# gpu_tuned_verify_build_info_json <elf> [name[:type]=expected]... -- reads the stamp and requires each given
+# field to equal the expected value (dotted names reach into objects; :int and :bool compare as JSON types).
+# Fails loudly naming the field, the expected and the actual value; with no fields it only requires valid JSON.
+gpu_tuned_verify_build_info_json() {
+    local file="${1:-}" json
+    shift || true
+    json="$(gpu_tuned_read_build_info "${file}")" || return 1
+    python3 - "${json}" "$@" <<'PY'
+import json, re, sys
+try:
+    obj = json.loads(sys.argv[1])
+except ValueError as e:
+    sys.exit("ERROR: gpu_tuned_verify_build_info_json: the stamp is not valid JSON (%s)." % e)
+bad = 0
+for arg in sys.argv[2:]:
+    name, _, want = arg.partition("=")
+    typ = "str"
+    if ":" in name:
+        name, typ = name.rsplit(":", 1)
+    if typ == "int":
+        want = int(want)
+    elif typ == "bool":
+        want = (want == "true")
+    node = obj
+    for part in name.split("."):
+        node = node.get(part) if isinstance(node, dict) else None
+    if node != want:
+        print("ERROR: gpu_tuned_verify_build_info_json: field %s is %r, expected %r." % (name, node, want), file=sys.stderr)
+        bad = 1
+sys.exit(bad)
+PY
+}
+
+# gpu_tuned_fetch_nccl_release <release-tag> <dest-dir> -- download a zbrad/nccl release, check the tarball
+# against its published sha256, check its BUILD_INFO names the tag, and extract it into <dest-dir> (the
+# tarball's top directory is stripped, so <dest-dir>/lib/libnccl_static.a and <dest-dir>/include/nccl.h
+# exist). Idempotent: a <dest-dir> already holding that tag is left alone. Needs `gh` logged in. Never
+# extracts a tag whose files do not match their checksum, never leaves a half-extracted <dest-dir>, and
+# refuses to replace a destination whose path has no /nccl/ component. pytorch's tuned/fetch_nccl.sh is the
+# same logic as a script; new callers use this.
+gpu_tuned_fetch_nccl_release() {
+    local tag="${1:-}" dest="${2:-}" work tarball top
+    [[ -n "${tag}" && -n "${dest}" ]] || { echo "ERROR: gpu_tuned_fetch_nccl_release: need <release-tag> <dest-dir>." >&2; return 1; }
+    [[ "${dest}" == */nccl/* ]] || { echo "ERROR: gpu_tuned_fetch_nccl_release: refusing destination ${dest} (no /nccl/ component)." >&2; return 1; }
+    if [[ -f "${dest}/.tag" && "$(cat "${dest}/.tag")" == "${tag}" && -f "${dest}/lib/libnccl_static.a" ]]; then
+        return 0
+    fi
+    command -v gh >/dev/null || { echo "ERROR: gpu_tuned_fetch_nccl_release: needs the gh CLI to download zbrad/nccl ${tag}." >&2; return 1; }
+    work="$(mktemp -d)"
+    echo "[nccl] downloading zbrad/nccl ${tag}" >&2
+    if ! gh release download "${tag}" --repo zbrad/nccl --pattern '*.tar.gz' --pattern '*.tar.gz.sha256' --dir "${work}" >&2; then
+        rm -rf "${work}"; echo "ERROR: gpu_tuned_fetch_nccl_release: could not download zbrad/nccl ${tag}." >&2; return 1
+    fi
+    tarball="$(find "${work}" -maxdepth 1 -name '*.tar.gz' | head -1)"
+    if [[ ! -f "${tarball}" || ! -f "${tarball}.sha256" ]]; then
+        rm -rf "${work}"; echo "ERROR: gpu_tuned_fetch_nccl_release: zbrad/nccl ${tag} has no tarball and .sha256 asset pair." >&2; return 1
+    fi
+    if ! (cd "${work}" && sha256sum -c "$(basename "${tarball}").sha256" >/dev/null 2>&1); then
+        rm -rf "${work}"; echo "ERROR: gpu_tuned_fetch_nccl_release: the tarball does not match its published sha256." >&2; return 1
+    fi
+    tar -xzf "${tarball}" -C "${work}" || { rm -rf "${work}"; return 1; }
+    top="$(find "${work}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    if ! grep -q "^tag=${tag}$" "${top}/BUILD_INFO" 2>/dev/null; then
+        rm -rf "${work}"; echo "ERROR: gpu_tuned_fetch_nccl_release: BUILD_INFO in the tarball does not say tag=${tag}." >&2; return 1
+    fi
+    if [[ ! -f "${top}/lib/libnccl_static.a" || ! -f "${top}/include/nccl.h" ]]; then
+        rm -rf "${work}"; echo "ERROR: gpu_tuned_fetch_nccl_release: the tarball lacks lib/libnccl_static.a or include/nccl.h." >&2; return 1
+    fi
+    echo "${tag}" > "${top}/.tag"
+    mkdir -p "$(dirname "${dest}")"
+    rm -rf -- "${dest}"
+    mv "${top}" "${dest}"
+    rm -rf "${work}"
+    echo "[nccl] ${tag} verified and extracted to ${dest}" >&2
+}
+
+# gpu_tuned_verify_bundled_cuda_flavor <cuda-version> <file>... -- for each system file a package is about to
+# bundle, find the Debian package that owns it (dpkg -S) and refuse if that package carries a CUDA flavour
+# (+cuda<X.Y> in its version) other than <cuda-version>. A NCCL built for CUDA 13.3 shipped in a 13.4 package
+# is exactly this. A file no package owns, or a package with no +cuda flavour, is not judged here (the
+# toolkit file's pinned versions and the package gate cover those). Fails loudly naming file, package and both
+# flavours. Never installs or changes anything.
+gpu_tuned_verify_bundled_cuda_flavor() {
+    local want="${1:-}" f owner pkg ver flavour rc=0
+    shift || true
+    [[ "${want}" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "ERROR: gpu_tuned_verify_bundled_cuda_flavor: <cuda-version> must look like 13.4, got '${want}'." >&2; return 1; }
+    command -v dpkg >/dev/null 2>&1 || { echo "WARNING: gpu_tuned_verify_bundled_cuda_flavor: dpkg not found; bundled CUDA flavours not checked." >&2; return 0; }
+    for f in "$@"; do
+        owner="$(dpkg -S "$(readlink -f "${f}")" 2>/dev/null | head -1)" || true
+        pkg="${owner%%:*}"
+        [[ -n "${owner}" && -n "${pkg}" ]] || continue
+        ver="$(dpkg-query -W -f='${Version}' "${pkg}" 2>/dev/null || true)"
+        flavour="$(printf '%s' "${ver}" | sed -n 's/.*+cuda\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+        [[ -n "${flavour}" ]] || continue
+        if [[ "${flavour}" != "${want}" ]]; then
+            echo "ERROR: gpu_tuned_verify_bundled_cuda_flavor: ${f} belongs to ${pkg} ${ver}, built for CUDA ${flavour}, but this package is for CUDA ${want}. Do not bundle it: pin a build made for ${want} (docs/ARCHITECTURE.md)." >&2
+            rc=1
+        fi
+    done
+    return "${rc}"
+}
+
 # gpu_tuned_check_wheel_label <wheel-path> -- refuses (returns 1) unless the wheel's file name
 # carries a date-form local version: <public>+[<scm>.]<variant>.cu<cuda>.<YYYYMMDD>[.<seq>] with a
 # real calendar date and no ".0" sequence (docs/VERSIONING.md). Reads the file NAME only, so it
@@ -873,7 +1133,7 @@ gpu_tuned_check_wheel_label() {
         return 1
     fi
     local_part="${version#*+}"
-    if [[ "${local_part}" =~ ^([a-z][a-z0-9]*\.)*[a-z][a-z0-9]*\.cu[0-9]+\.([1-9][0-9]{7})(\.[1-9][0-9]*)?$ ]]; then
+    if [[ "${local_part}" =~ ^([a-z][a-z0-9]*\.)*[a-z][a-z0-9]*\.cu[0-9]+\.([1-9][0-9]{7})(\.(0|[1-9][0-9]*))?$ ]]; then
         date="${BASH_REMATCH[2]}"
         if gpu_tuned_valid_date "${date}"; then return 0; fi
         echo "ERROR: gpu_tuned_check_wheel_label: ${name} carries ${date}, which is not a real calendar date." >&2
@@ -931,6 +1191,39 @@ gpu_tuned_verify_resolves_in() {
         fi
     done
     return "${rc}"
+}
+
+# gpu_tuned_newest_release_tag <variant> <cuda-tag> -- reads release tags on stdin (one per line, newest
+# first, as `gh release list` prints them) and prints the newest native tag for that variant and
+# toolkit: the highest v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, ranked by date then sequence as numbers
+# (.10 above .2), never by list order. A tag in an older form (v<ver>-<variant>-<cuda>[-g<sha>]) is never
+# preferred over a date-label one; with no date-label tag it falls back to the first older-form tag, with
+# a NOTE on stderr, so a consumer keeps working until a date-label release exists (ARCHITECTURE.md E7).
+# Prints nothing and returns 1 if no tag matches at all.
+gpu_tuned_newest_release_tag() {
+    local variant="${1:-}" cuda="${2:-}" t label key best="" bestkey="" legacy=""
+    local tags=()
+    if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ || ! "${cuda}" =~ ^cu[0-9]+$ ]]; then
+        echo "ERROR: gpu_tuned_newest_release_tag: need <variant> <cuNNN>, got '${variant}' '${cuda}'." >&2
+        return 1
+    fi
+    while IFS= read -r t; do tags+=("${t}"); done
+    for t in "${tags[@]}"; do
+        if [[ "${t}" == "v0."*"-${variant}-${cuda}" ]]; then
+            label="$(gpu_tuned_date_label "${t}")"
+            [[ -n "${label}" ]] || continue
+            key="$(printf '%s %012d' "${label%%.*}" "$(gpu_tuned_label_seq "${label}")")"
+            if [[ -z "${bestkey}" || "${key}" > "${bestkey}" ]]; then best="${t}"; bestkey="${key}"; fi
+        elif [[ -z "${legacy}" && "${t}" =~ ^v[0-9].*-${variant}-${cuda}(-g[0-9a-f]+)?$ ]]; then
+            legacy="${t}"
+        fi
+    done
+    if [[ -n "${best}" ]]; then printf '%s\n' "${best}"; return 0; fi
+    if [[ -n "${legacy}" ]]; then
+        echo "NOTE: no date-label ${variant}-${cuda} release exists; using the older-form tag ${legacy}." >&2
+        printf '%s\n' "${legacy}"; return 0
+    fi
+    return 1
 }
 
 # gpu_tuned_smoke_wheel <wheel> <dist-name> <import-name> [<stamp-section> <stamp-library>]
@@ -1297,18 +1590,19 @@ gpu_tuned_valid_date() {
 }
 
 # gpu_tuned_local_version_dated <variant> <cuda-compact> <YYYYMMDD> [<seq>] --
-# prints the date-form PEP 440 local label: <variant>.cu<cuda>.<YYYYMMDD>[.<seq>]
-# e.g. "0.7.0+gb10.cu134.20261010" and, for a second build the same day,
+# prints the date-form PEP 440 local label: <variant>.cu<cuda>.<YYYYMMDD>.<seq>
+# e.g. "0.7.0+gb10.cu134.20261010.0" and, for a second build the same day,
 # "0.7.0+gb10.cu134.20261010.1". Replaces "<variant>.cu<cuda>.tuning.<N>" (user
 # decision 2026-10-11, docs/VERSIONING.md); gpu_tuned_local_version is kept for
 # consumers that have not migrated.
 #
 # <seq> is the build's sequence within its date: 0 (the default) is the first
-# build and is OMITTED from the label; 1, 2, ... are appended. It must be a
-# canonical integer (no leading zeros). A ".0" label is never produced because
-# PEP 440 sorts "<date>.0" above "<date>", which would make it a second spelling
-# of the first build. The native release tag renders the same integer in full
-# (v0.<date>.<seq>, so ".0" there); both come from one sequence value.
+# build; it is always written, as in the native release tag (v0.<date>.<seq>), so
+# one integer renders both. It must be a canonical integer (no leading zeros).
+# Since 2026-10-16 (user decision) the first build is written ".0"; wheels labelled
+# with the bare date before that stay valid, are read as sequence 0 and are never
+# renamed. PEP 440 sorts "<date>.0" above "<date>" (checked with packaging), so a
+# new ".0" build ranks above an old bare one of the same date, as it should.
 gpu_tuned_local_version_dated() {
     local variant="${1:-}" cuda="${2:-}" date="${3:-}" seq="${4:-0}"
     if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ ]]; then
@@ -1327,25 +1621,25 @@ gpu_tuned_local_version_dated() {
         echo "ERROR: gpu_tuned_local_version_dated: sequence '${seq}' must be a canonical integer (0 = first build of the day, no leading zeros)." >&2
         return 1
     fi
-    if [ "${seq}" = "0" ]; then
-        echo "${variant}.cu${cuda}.${date}"
-    else
-        echo "${variant}.cu${cuda}.${date}.${seq}"
-    fi
+    echo "${variant}.cu${cuda}.${date}.${seq}"
 }
 
 # gpu_tuned_date_label <version-string> -- prints the "<YYYYMMDD>[.<seq>]" label
 # at the END of a date-form tuned version (e.g. "0.7.0+gb10.cu134.20261010.1" ->
-# "20261010.1"), or nothing (still exit 0) if the version does not end that way.
+# "20261010.1"; ".0" and the older bare spelling both read as "20261010"), or nothing (still
+# exit 0) if the version does not end that way.
 # Anchored on the "<variant>.cu<cuda>." that precedes it, because without the old
 # "tuning" marker a bare digit match would also hit a CUDA segment or setuptools_scm's
-# g<sha>. A ".0" sequence and an impossible calendar date are not labels. Never
+# g<sha>. An impossible calendar date or a zero-padded sequence is not a label. Never
 # fails (callers run under pipefail).
 gpu_tuned_date_label() {
     local v="${1:-}" label=""
-    if [[ "${v}" =~ \.cu[0-9]+\.([1-9][0-9]{7}(\.[1-9][0-9]*)?)$ ]]; then
+    if [[ "${v}" =~ \.cu[0-9]+\.([1-9][0-9]{7})(\.(0|[1-9][0-9]*))?$ ]]; then
         label="${BASH_REMATCH[1]}"
-        gpu_tuned_valid_date "${label:0:8}" || label=""
+        local wseq="${BASH_REMATCH[3]}"   # saved first: gpu_tuned_valid_date's own regex overwrites BASH_REMATCH
+        gpu_tuned_valid_date "${label}" || label=""
+        # ".0" is the first build and reads as the bare date (also the older, bare spelling).
+        [ -z "${label}" ] || [ -z "${wseq}" ] || [ "${wseq}" = 0 ] || label="${label}.${wseq}"
     elif [[ "${v}" =~ ^v0\.([1-9][0-9]{7})\.(0|[1-9][0-9]*)-[a-z][a-z0-9]*-cu[0-9]+$ ]]; then
         # native release tag v0.<date>.<seq>-<variant>-cu<cuda>; seq 0 is the bare date
         label="${BASH_REMATCH[1]}"
@@ -1360,7 +1654,7 @@ gpu_tuned_date_label() {
 # gpu_tuned_native_tag <variant> <cuda-tag> <label> -- the release tag of a native (non-wheel)
 # build: v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, e.g. v0.20261011.0-gb10-cu134. <label> is
 # "<YYYYMMDD>[.<seq>]" from gpu_tuned_allocate_date_label; the sequence is always written here
-# (0 for a bare date), where a wheel label omits it. gpu_tuned_date_label reads the tag back.
+# (0 for a bare date), as a wheel version does too (user decision 2026-10-16). gpu_tuned_date_label reads the tag back.
 gpu_tuned_native_tag() {
     local variant="${1:-}" cuda_tag="${2:-}" label="${3:-}" date seq
     date="${label%%.*}"

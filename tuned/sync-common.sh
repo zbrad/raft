@@ -59,7 +59,7 @@ current_sha() {
     [[ -f "${SHA_FILE}" ]] && cat "${SHA_FILE}" || echo "unknown"
 }
 
-# Data files (devices/*.conf, toolkits/*.env, toolkits/DEFAULT) are vendored into
+# Data files (devices/*.conf, toolkits/*.env) are vendored into
 # <this dir>/common-data/ only when that directory already exists, so a
 # consumer opts in with `mkdir tuned/common-data` and repos that keep their
 # own device files are untouched. Files are overwritten from upstream; local
@@ -71,7 +71,7 @@ sync_data() {
     local sha="$1" paths path tmp changed=0 listed=""
     paths="$(curl -fsSL "${REPO_API_BASE}/git/trees/${sha}?recursive=1" \
         | jq -r '.tree[] | select(.type == "blob") | .path' \
-        | grep -E '^(devices/[^/]+\.conf|toolkits/[^/]+\.env|toolkits/DEFAULT)$' || true)"
+        | grep -E '^(devices/[^/]+\.conf|toolkits/[^/]+\.env)$' || true)"
     while IFS= read -r path; do
         [[ -n "${path}" ]] || continue
         listed+="${path}"$'\n'
