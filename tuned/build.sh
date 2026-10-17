@@ -53,9 +53,11 @@ NINJA_OFFSET=0
 BUILD_T0="${EPOCHSECONDS}"
 ccache -z >/dev/null 2>&1 || true
 
-# Unique shared-object identities at build time: the fetched librmm and librapids_logger get
-# OUTPUT_NAME <name>-tuned through a CMake include (no upstream source is edited), so the build tree,
-# the install tree, every DT_NEEDED and the CMake export files all carry the names we ship.
+# Unique shared-object identities at build time (docs/ARCHITECTURE.md F1): the fetched librmm and
+# librapids_logger contain no device code, so they get OUTPUT_NAME <name>-<toolkit> (librmm-cu133.so) through a
+# CMake include (no upstream source is edited), so the build tree, the install tree, every DT_NEEDED and the CMake
+# export files all carry the names we ship. libraft has device code and is named lib<RAFT_LIB_NAME>.so
+# (-<variant>-<toolkit>) by RAFT_OUTPUT_NAME. The gate below proves each name from the library's contents.
 # The install tree (below) must not be found by the next configure: a cached rmm_DIR/rapids_logger_DIR
 # pointing into it makes CMake use the installed copies instead of building the dependencies, so the
 # renamed targets would not exist. Hence the ignored prefix and the two -U. The pip wheels in the user
@@ -65,7 +67,7 @@ gpu_tuned_warn_pip_cmake_packages
 SO_NAMES_CMAKE="${GPU_TUNED_BUILD_ROOT}/so_names.cmake"
 gpu_tuned_so_names_cmake "${SO_NAMES_CMAKE}" || exit 1
 
-LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR\""
+LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DTUNED_SO_MARK=-${CUDA_TAG} -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR\""
 
 # Nothing the configure resolved may come from a pip wheel: it would not be the fetched, tested copy and
 # would be missing from the package (see gpu_tuned_verify_no_pip_cmake_deps).
@@ -101,15 +103,18 @@ command -v ccache >/dev/null 2>&1 && echo "ccache: $(ccache -s | grep -E 'Hits:|
 # The install tree (tuned/package.sh copies <build>/install). Upstream's build step did not leave one
 # here; the prefix is baked into the CMake cache, so this is an idempotent copy.
 # Start from an empty install tree: cmake --install only adds files, so libraries installed by an earlier
-# build under a different name (the stock librmm.so before the -tuned rename) would be packaged alongside.
+# build under a different name (the stock librmm.so, or the older -tuned names) would be packaged alongside.
 [[ "${BUILD_DIR}/install" == "${PROJECT_ROOT}/tuned/build/"*/cmake/install ]] || { echo "ERROR: unexpected install dir ${BUILD_DIR}/install" >&2; exit 1; }
 rm -rf "${BUILD_DIR}/install"
 cmake --install "${BUILD_DIR}" >/dev/null || { echo "ERROR: cmake --install failed in ${BUILD_DIR}" >&2; exit 1; }
 [[ -f "${BUILD_DIR}/install/lib/lib${RAFT_LIB_NAME}.so" ]] || { echo "ERROR: install produced no lib${RAFT_LIB_NAME}.so under ${BUILD_DIR}/install/lib" >&2; exit 1; }
-for _so in librmm-tuned.so librapids_logger-tuned.so; do
+for _so in "librmm-${CUDA_TAG}.so" "librapids_logger-${CUDA_TAG}.so"; do
     [[ -f "${BUILD_DIR}/install/lib/${_so}" ]] || { echo "ERROR: install produced no ${_so} under ${BUILD_DIR}/install/lib (the build-time rename did not take effect)" >&2; exit 1; }
 done
 unset _so
+# F1: every shared object carries the mark its contents require (device code or a variant dependency: -<variant>-<toolkit>;
+# otherwise -<toolkit>), in its file name and SONAME.
+gpu_tuned_verify_so_axes "${BUILD_DIR}/install/lib" "${GPU_TUNED_VARIANT}" "${CUDA_TAG}" - || exit 1
 
 gpu_tuned_verify_arch "${BUILD_DIR}/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 

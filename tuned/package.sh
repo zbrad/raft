@@ -79,19 +79,16 @@ fi
 # Unique shared-object identities for the rapids chain this tree ships. librmm.so and
 # librapids_logger.so carry the same file names and SONAMEs as stock RAPIDS, so a stock install (or an
 # LD_LIBRARY_PATH pointing at one) could be loaded in place of ours, or ours in place of theirs. They
-# become librmm-tuned.so / librapids_logger-tuned.so (file name, SONAME, every DT_NEEDED naming them),
-# and the installed CMake import targets are repointed so consumers (zbrad/cuvs, faiss) link the tuned
-# names. lib<RAFT_LIB_NAME>.so already carries variant and CUDA tag, so it is kept as is; libraft.a is
-# an archive with no SONAME. See "unique shared-object identities" in tuned-common's tuned-common.sh.
+# are named librmm-<toolkit>.so / librapids_logger-<toolkit>.so (no device code: docs/ARCHITECTURE.md F1) by
+# tuned/build.sh, with every DT_NEEDED naming them and the installed CMake import targets repointed so consumers
+# (zbrad/cuvs, faiss) link those names. lib<RAFT_LIB_NAME>.so has device code and already carries
+# -<variant>-<toolkit>; libraft.a is an archive with no SONAME. The manifest below records the mark each
+# takes, chosen from the library's contents; the rename is a no-op on a tree the build already named, and renames
+# a stock-named file from an older install tree.
 echo ""
-echo "Giving the rapids-chain shared objects unique identities:"
+echo "Checking the rapids-chain shared objects' identities:"
 OURS_MANIFEST="$(mktemp)"
-for so in librmm.so librapids_logger.so; do
-    # tuned/build.sh already builds these under their -tuned names; a stock-named file here is renamed by
-    # the helper (and an older install tree would be caught by its gate), a missing one is a stale list.
-    [[ -f "${PKG_DIR}/lib/${so}" || -f "${PKG_DIR}/lib/$(gpu_tuned_tuned_so_name "${so}")" ]] || { echo "ERROR: neither ${so} nor its tuned name is in ${PKG_DIR}/lib; the rename list is stale." >&2; exit 1; }
-    echo "${so}" >> "${OURS_MANIFEST}"
-done
+gpu_tuned_axes_manifest "${PKG_DIR}/lib" "${GPU_TUNED_VARIANT}" "${CUDA_TAG}" "${OURS_MANIFEST}" librmm.so librapids_logger.so || { rm -f "${OURS_MANIFEST}"; exit 1; }
 KEEP_RE="^lib${RAFT_LIB_NAME}\\.so\$"
 # Renames, repoints the installed CMake import files, then fails closed: every shared object is
 # renamed or the kept raft lib, every DT_NEEDED resolves in the tree or is a toolkit/system library.
@@ -99,6 +96,8 @@ gpu_tuned_rename_package "${PKG_DIR}/lib" "${OURS_MANIFEST}" - "${KEEP_RE}" \
     '^(linux-vdso\.so|ld-linux|libc\.so|libm\.so|libdl\.so|libpthread\.so|librt\.so|libgcc_s\.so|libstdc\+\+\.so|libcuda\.so|libcudart\.so|libcublas\.so|libcublasLt\.so|libcusolver\.so|libcusparse\.so)' \
     "${PKG_DIR}/lib/cmake" "${PKG_DIR}/lib/pkgconfig" || { rm -f "${OURS_MANIFEST}"; exit 1; }
 rm -f "${OURS_MANIFEST}"
+# F1: each shared object (the raft lib included) carries the mark its contents require
+gpu_tuned_verify_so_axes "${PKG_DIR}/lib" "${GPU_TUNED_VARIANT}" "${CUDA_TAG}" - || exit 1
 # patchelf rewrote the files; the build-info stamp on the raft lib must have survived
 gpu_tuned_verify_build_info_json "${PKG_DIR}/lib/lib${RAFT_LIB_NAME}.so" "release=${RELEASE_TAG}" "variant=${GPU_TUNED_VARIANT}" "cuda.tag=${CUDA_TAG}" || exit 1
 

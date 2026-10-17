@@ -6,7 +6,7 @@
 #   3. a consumer configures against the extracted tree alone (nvtx3, rmm, rapids_logger inside it);
 #   4. three real gtest binaries from the build tree (CORE_TEST_NOCUDA, MATRIX_SELECT_TEST, UTILS_TEST)
 #      run and pass with the extracted tree's lib/ first on LD_LIBRARY_PATH, and the libraries they
-#      need (libraft-<variant>-<cuda>.so, librmm-tuned.so, librapids_logger-tuned.so) resolve to files
+#      need (libraft-<variant>-<cuda>.so, librmm-<cuda>.so, librapids_logger-<cuda>.so) resolve to files
 #      inside the extracted tree, not the build tree or a stock install.
 # This is a smoke test, not the suite: tuned/full_test.sh already ran every binary against the build
 # tree. What is new here is that the bits in the tarball are the ones running. Writes
@@ -62,7 +62,7 @@ run() {
     for t in CORE_TEST_NOCUDA MATRIX_SELECT_TEST UTILS_TEST; do
         bin="${BUILD_DIR}/gtests/${t}"
         if [[ ! -x "${bin}" ]]; then fail "${t}: ${bin} not found (build the tests: tuned/build.sh with tests, then tuned/full_test.sh)"; continue; fi
-        libs=('^librmm-tuned\.so' '^librapids_logger-tuned\.so')
+        libs=("^librmm-${CUDA_TAG}\.so" "^librapids_logger-${CUDA_TAG}\.so")
         ldd "${bin}" | grep -q "libraft-${GPU_TUNED_VARIANT}-${CUDA_TAG}" && libs+=("^libraft-${GPU_TUNED_VARIANT}-${CUDA_TAG}\\.so")
         gpu_tuned_verify_resolves_in "${EXT}" "${bin}" "${libs[@]}" 2>&1 && ok "${t}: ${libs[*]} resolve inside the package" || fail "${t}: libraries do not resolve inside the package"
         out="$(LD_LIBRARY_PATH="${EXT}/lib:${TOOLKIT_LIB_DIR}" "${bin}" 2>&1)"; rc=$?
