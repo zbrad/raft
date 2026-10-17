@@ -1911,48 +1911,76 @@ gpu_tuned_so_has_device_code() {
 }
 
 # gpu_tuned_so_mark_for <elf> <variant> <toolkit> -- prints the mark a shared object must carry (docs/ARCHITECTURE.md
-# F1): "-<variant>-<toolkit>" if it has device code, "-<toolkit>" if not. <variant> is e.g. gb10, <toolkit> e.g. cu133.
-# rc 1 on a bad argument or when it cannot be classified.
+# F1): "-<variant>-<toolkit>" if it has device code OR if it NEEDs a library already named "-<variant>-<toolkit>"
+# (the variant is transitive: a wrapper bound to one variant's library is bound to that variant, decided
+# 2026-10-17), else "-<toolkit>". <variant> is e.g. gb10, <toolkit> e.g. cu133. A NEEDED name is judged by its
+# final form, so for a stage that is not renamed yet use gpu_tuned_axes_manifest, which resolves the dependencies
+# within the manifest. rc 1 on a bad argument or when it cannot be classified.
 gpu_tuned_so_mark_for() {
-    local f="${1:-}" variant="${2:-}" tk="${3:-}" rc
+    local f="${1:-}" variant="${2:-}" tk="${3:-}" rc d
     if [[ ! "${variant}" =~ ^[a-z][a-z0-9]*$ || ! "${tk}" =~ ^cu[0-9]+$ ]]; then
         echo "ERROR: gpu_tuned_so_mark_for: need <elf> <variant> <cuNNN>, got '${variant}' '${tk}'." >&2
         return 1
     fi
     if gpu_tuned_so_has_device_code "${f}"; then rc=0; else rc=$?; fi
     case "${rc}" in
-        0) printf -- '-%s-%s\n' "${variant}" "${tk}" ;;
-        1) printf -- '-%s\n' "${tk}" ;;
+        0) printf -- '-%s-%s\n' "${variant}" "${tk}"; return 0 ;;
+        1) ;;
         *) return 1 ;;
     esac
+    while IFS= read -r d; do
+        if [[ "${d}" =~ ^lib.+-${variant}-${tk}\.so(\.[0-9]+)*$ ]]; then
+            printf -- '-%s-%s\n' "${variant}" "${tk}"
+            return 0
+        fi
+    done < <(patchelf --print-needed "${f}" 2>/dev/null)
+    printf -- '-%s\n' "${tk}"
 }
 
 # gpu_tuned_axes_manifest <stage-dir> <variant> <toolkit> <out-manifest> <name>... -- write a rename manifest for
-# gpu_tuned_rename_sonames / gpu_tuned_rename_package, one "<name> <mark>" line per <name>, the mark chosen by
-# gpu_tuned_so_mark_for from the file's contents. A name already renamed by an earlier run is classified from its
-# renamed file, so running it again writes the same manifest. Fails if a name is in neither form or cannot be classified.
+# gpu_tuned_rename_sonames / gpu_tuned_rename_package, one "<name> <mark>" line per <name>, the mark chosen from the
+# file's contents by the F1 rule (device code, or a dependency on a variant library, takes the variant; see
+# gpu_tuned_so_mark_for). Dependencies are resolved ACROSS the manifest: a library that still NEEDs an unrenamed
+# manifest name whose own mark carries the variant takes the variant too, repeated until nothing changes. A name
+# already renamed by an earlier run is classified from its renamed file, so running it again writes the same
+# manifest. Fails if a name is in neither form or cannot be classified.
 gpu_tuned_axes_manifest() {
-    local stage="${1:-}" variant="${2:-}" tk="${3:-}" out="${4:-}" name m f mark found
+    local stage="${1:-}" variant="${2:-}" tk="${3:-}" out="${4:-}" name m f d n changed
+    local vmark="-${variant}-${tk}"
+    declare -A file=() mark=()
     shift $(( $# < 4 ? $# : 4 ))
     [ -d "${stage}" ] && [ -n "${out}" ] && [ "$#" -gt 0 ] || { echo "ERROR: gpu_tuned_axes_manifest: need <stage-dir> <variant> <toolkit> <out-manifest> <name>..." >&2; return 1; }
-    : > "${out}"
     for name in "$@"; do
-        found=""
-        for m in "" "-${variant}-${tk}" "-${tk}" "${GPU_TUNED_SO_MARK}"; do
-            f="${stage}/${name}"
-            [ -z "${m}" ] || f="${stage}/$(gpu_tuned_tuned_so_name "${name}" "${m}")"
-            if [ -f "${f}" ]; then found="${f}"; break; fi
+        f=""
+        for m in "" "${vmark}" "-${tk}" "${GPU_TUNED_SO_MARK}"; do
+            n="${name}"
+            [ -z "${m}" ] || n="$(gpu_tuned_tuned_so_name "${name}" "${m}")"
+            if [ -f "${stage}/${n}" ]; then f="${stage}/${n}"; break; fi
         done
-        [ -n "${found}" ] || { echo "ERROR: gpu_tuned_axes_manifest: '${name}' is not in ${stage}." >&2; return 1; }
-        mark="$(gpu_tuned_so_mark_for "${found}" "${variant}" "${tk}")" || return 1
-        printf '%s %s\n' "${name}" "${mark}" >> "${out}"
+        [ -n "${f}" ] || { echo "ERROR: gpu_tuned_axes_manifest: '${name}' is not in ${stage}." >&2; return 1; }
+        file["${name}"]="${f}"
+        mark["${name}"]="$(gpu_tuned_so_mark_for "${f}" "${variant}" "${tk}")" || return 1
     done
+    changed=1
+    while [ "${changed}" -eq 1 ]; do
+        changed=0
+        for name in "$@"; do
+            [ "${mark[${name}]}" = "${vmark}" ] && continue
+            while IFS= read -r d; do
+                for n in "$@"; do
+                    if [ "${d}" = "${n}" ] && [ "${mark[${n}]}" = "${vmark}" ]; then mark["${name}"]="${vmark}"; changed=1; break 2; fi
+                done
+            done < <(patchelf --print-needed "${file[${name}]}" 2>/dev/null)
+        done
+    done
+    : > "${out}"
+    for name in "$@"; do printf '%s %s\n' "${name}" "${mark[${name}]}" >> "${out}"; done
 }
 
 # gpu_tuned_verify_so_axes <stage-dir> <variant> <toolkit> <system-manifest|-> [keep-regex] -- the F1 gate: every
 # shared object in <stage-dir> that is not a recorded system library or kept on purpose carries exactly the mark its
-# CONTENTS require, in its file name and in its SONAME: "-<variant>-<toolkit>" with device code, "-<toolkit>" without
-# (and a library without device code must not carry the variant). Prints every violation, returns 1 if any, and
+# CONTENTS require, in its file name and in its SONAME: "-<variant>-<toolkit>" with device code or when it NEEDs a
+# library carrying the variant, "-<toolkit>" otherwise (and then it must not carry the variant). Prints every violation, returns 1 if any, and
 # also when a library cannot be classified (a check that cannot run is a failure).
 gpu_tuned_verify_so_axes() {
     local stage="${1:-}" variant="${2:-}" tk="${3:-}" sysman="${4:--}" keep="${5:-}" f n soname mark base bad=0
