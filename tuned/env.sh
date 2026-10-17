@@ -99,21 +99,4 @@ export CCACHE_DIR="${GPU_TUNED_BUILD_ROOT}/ccache"
 export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-40G}"
 export GPU_TUNED_BUILD_ROOT
 
-# gpu_tuned_assert_cmake_cache_consistent <cmake-build-dir>: fail if an existing CMake cache was
-# configured for another toolkit or another source tree (it would silently keep them).
-gpu_tuned_assert_cmake_cache_consistent() {
-    local cache="${1}/CMakeCache.txt" cached
-    [[ -f "${cache}" ]] || return 0
-    cached="$(sed -n 's/^CMAKE_CUDA_COMPILER:FILEPATH=//p' "${cache}" | head -1)"
-    if [[ -n "${cached}" && "${cached}" != "${CUDA_HOME}/bin/nvcc" ]]; then
-        echo "ERROR: ${cache} was configured with ${cached}, but CUDA_HOME=${CUDA_HOME}. Remove that tree first: rm -rf ${1}" >&2
-        return 1
-    fi
-    cached="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${cache}" | head -1)"
-    if [[ -n "${cached}" && "${cached}" != "${GPU_TUNED_REPO_ROOT}/cpp" ]]; then
-        echo "ERROR: ${cache} was configured for source tree ${cached}, not ${GPU_TUNED_REPO_ROOT}/cpp -- looks copied from another checkout. Remove that tree first: rm -rf ${1}" >&2
-        return 1
-    fi
-}
-
 echo "CUDA_HOME=${CUDA_HOME}  CUDA_VERSION=${CUDA_VERSION}  CUDA_VERSION_COMPACT=${CUDA_VERSION_COMPACT}"
