@@ -60,7 +60,7 @@ RMM_SRC="${SOURCE_BUILD_DIR}/_deps/rmm-src"
 # human-facing OS/CPU descriptor below) -- this script has no CUDA-arch
 # axis of its own (librmm/rmm have no device code), so env.sh's
 # full detection isn't needed, just the static per-variant conf.
-source "${PROJECT_ROOT}/tuned/devices/${SOURCE_ARCH}.conf" || exit 1
+source "${PROJECT_ROOT}/tuned/common-data/devices/${SOURCE_ARCH}.conf" || exit 1
 
 RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
 RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1

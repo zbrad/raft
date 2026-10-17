@@ -47,7 +47,7 @@ NVCC_THREADS="${CUPY_NUM_NVCC_THREADS:-2}"
 # The virtual (PTX) arch and real arch match for every variant here (e.g.
 # compute_121a/sm_121a for gb10, compute_120/sm_120 for rtx50) -- the
 # "a" suffix (or lack of it) is exactly GPU_TUNED_CUDA_ARCH's own value,
-# see tuned/devices/*.conf for why each variant needs what it needs.
+# see tuned/common-data/devices/*.conf for why each variant needs what it needs.
 CUPY_NVCC_GENERATE_CODE="arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}"
 
 mkdir -p "${DIST_DIR}"

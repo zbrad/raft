@@ -14,8 +14,15 @@
 #   CUDA_HOME             — root of the active CUDA toolkit (e.g. /usr/local/cuda-13.3)
 #   CUDA_VERSION          — full dotted version   (e.g. 13.3)
 #   CUDA_VERSION_COMPACT  — digits only            (e.g. 133)
-#   GPU_TUNED_VARIANT/GPU_TUNED_PLATFORM/GPU_TUNED_CUDA_ARCH/GPU_TUNED_HW_LABEL/GPU_TUNED_DEVICE_LABEL
-#                          — from tuned/devices/<variant>.conf, re-exported here for convenience
+#   CUDA_VER / CUDA_TAG   — the toolkit id (13.3 / cu133), as in the other tuned repos
+#   GPU_TUNED_VARIANT/GPU_TUNED_PLATFORM/GPU_TUNED_CUDA_ARCH/GPU_TUNED_HW_LABEL
+#                          — from the shared tuned/common-data/devices/<variant>.conf
+#   RAFT_DEVICE_LABEL     — from tuned/repo.env
+#
+# The toolkit comes from the vendored definitions in tuned/common-data/toolkits/<id>.env
+# (zbrad/tuned-common), never from /usr/local/cuda or from what is installed. There is no
+# default: name it with CUDA_TAG=cu133 or CUDA_VER=13.3. With neither set the loader fails and
+# lists the defined toolkits (at a terminal it asks which to use, for that run only).
 #
 # Also defines gpu_tuned_verify_arch() -- see below.
 
@@ -26,9 +33,10 @@ if [[ -z "${GPU_TUNED_ARG_VARIANT}" ]]; then
 fi
 
 GPU_TUNED_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=devices/rtx50.conf
-source "${GPU_TUNED_SELF_DIR}/devices/${GPU_TUNED_ARG_VARIANT}.conf" || return 1 2>/dev/null || exit 1
-export GPU_TUNED_VARIANT GPU_TUNED_PLATFORM GPU_TUNED_CUDA_ARCH GPU_TUNED_HW_LABEL GPU_TUNED_DEVICE_LABEL
+GPU_TUNED_DATA_DIR="${GPU_TUNED_SELF_DIR}/common-data"
+# shellcheck source=common-data/devices/gb10.conf
+source "${GPU_TUNED_DATA_DIR}/devices/${GPU_TUNED_ARG_VARIANT}.conf" || return 1 2>/dev/null || exit 1
+export GPU_TUNED_VARIANT GPU_TUNED_PLATFORM GPU_TUNED_CUDA_ARCH GPU_TUNED_HW_LABEL
 
 # shellcheck source=common.sh
 # Vendored from https://github.com/zbrad/tuned-common (pinned commit --
@@ -50,65 +58,31 @@ source "${GPU_TUNED_SELF_DIR}/common.sh" || return 1 2>/dev/null || exit 1
 # any compilation happens at all).
 gpu_tuned_assert_platform "${GPU_TUNED_PLATFORM}" "${GPU_TUNED_VARIANT}" || return 1 2>/dev/null || exit 1
 
-# Detection order:
-#   1. An explicit caller-supplied CUDA_HOME is always honoured as-is.
-#   2. Otherwise, every /usr/local/cuda-X.Y toolkit with a working bin/nvcc
-#      is enumerated and the highest version (by `sort -V`) is used. This
-#      matters on hosts with several toolkits installed side by side (e.g.
-#      13.0/13.1/13.2/13.3) -- relying on nvcc-on-PATH or the
-#      /usr/local/cuda symlink silently picked the wrong one once during
-#      gb10 development, and the mismatch wasn't caught until a much later
-#      build stage.
-#   3. If no /usr/local/cuda-X.Y toolkits are found at all, fall back to
-#      nvcc on PATH, then the /usr/local/cuda symlink.
-
-if [[ -z "${CUDA_HOME:-}" ]]; then
-    mapfile -t _CUDA_TOOLKITS < <(
-        for d in /usr/local/cuda-*; do
-            [[ -x "${d}/bin/nvcc" ]] && echo "${d}"
-        done | sort -V
-    )
-    if (( ${#_CUDA_TOOLKITS[@]} > 0 )); then
-        CUDA_HOME="$(readlink -f "${_CUDA_TOOLKITS[-1]}")"
-        if (( ${#_CUDA_TOOLKITS[@]} > 1 )); then
-            echo "NOTE: multiple CUDA toolkits installed: ${_CUDA_TOOLKITS[*]}"
-            echo "      defaulting to the most recent: ${CUDA_HOME} -- set CUDA_HOME explicitly to override."
-        fi
-    fi
-    unset _CUDA_TOOLKITS
+# --- CUDA toolkit: chosen from tuned/common-data/toolkits, never inferred. CUDA_TAG (cu133) or
+#     CUDA_VER (13.3) select one; neither set is an error listing the defined ones. Exports
+#     CUDA_VER, CUDA_TAG, CUDA_HOME and puts $CUDA_HOME/bin on PATH. ---
+_raft_tk="${CUDA_TAG:-}"
+_raft_req_ver="${CUDA_VER:-}"
+if [ -z "${_raft_tk}" ] && [ -n "${_raft_req_ver}" ]; then
+    _raft_tk="cu${_raft_req_ver//./}"                           # 13.3 -> cu133
 fi
-
-if [[ -z "${CUDA_HOME:-}" ]]; then
-    if command -v nvcc &>/dev/null; then
-        CUDA_HOME="$(nvcc --version 2>/dev/null \
-            | sed -n 's|.*Build cuda_\([0-9][0-9]*\.[0-9][0-9]*\)\..*|\1|p' \
-            | xargs -I{} readlink -f /usr/local/cuda-{} 2>/dev/null || true)"
-    fi
-    if [[ -z "${CUDA_HOME:-}" && -e /usr/local/cuda ]]; then
-        CUDA_HOME="$(readlink -f /usr/local/cuda)"
-    fi
-fi
-
-if [[ -z "${CUDA_HOME:-}" ]]; then
-    echo "ERROR: could not locate CUDA toolkit. Set CUDA_HOME and re-run." >&2
+gpu_tuned_load_toolkit "${GPU_TUNED_DATA_DIR}" "${GPU_TUNED_VARIANT}" "${_raft_tk}" || return 1 2>/dev/null || exit 1
+if [ -n "${_raft_req_ver}" ] && [ "${_raft_req_ver}" != "${TOOLKIT_CUDA_VER}" ]; then
+    echo "[tuned/env] ERROR: CUDA_VER=${_raft_req_ver} conflicts with toolkit ${CUDA_TAG} (CUDA ${TOOLKIT_CUDA_VER})." >&2
     return 1 2>/dev/null || exit 1
 fi
+unset _raft_tk _raft_req_ver
+gpu_tuned_verify_toolkit || return 1 2>/dev/null || exit 1
 
-if [[ ! -x "${CUDA_HOME}/bin/nvcc" ]]; then
-    echo "ERROR: nvcc not found under CUDA_HOME=${CUDA_HOME}" >&2
-    return 1 2>/dev/null || exit 1
-fi
+# raft's own names for the toolkit version, used throughout tuned/ and the wheel scripts.
+CUDA_VERSION="${CUDA_VER}"
+CUDA_VERSION_COMPACT="${CUDA_VER//./}"
+export CUDA_VERSION CUDA_VERSION_COMPACT
 
-# Parse version from nvcc inside the detected CUDA_HOME.
-CUDA_VERSION="$("${CUDA_HOME}/bin/nvcc" --version \
-    | sed -n 's/.*release \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
-CUDA_VERSION_COMPACT="${CUDA_VERSION//./}"
-# "cu133" form, matching zbrad/cuvs's tuned/env.sh CUDA_TAG convention --
-# used to name this build's own output (see tuned/build.sh's
-# RAFT_LIB_NAME) the same way cuvs names its libcuvs-<variant>-<tag>.so.
-CUDA_TAG="${CUDA_TAG:-cu${CUDA_VERSION_COMPACT}}"
-
-export CUDA_HOME CUDA_VERSION CUDA_VERSION_COMPACT CUDA_TAG
+# --- Repo-specific settings (the device label), loaded last; may not change any shared
+#     device/toolkit key. ---
+gpu_tuned_load_repo_env "${GPU_TUNED_SELF_DIR}/repo.env" || return 1 2>/dev/null || exit 1
+export RAFT_DEVICE_LABEL
 
 # --- Output layout: one tree per toolkit, tuned/build/<cuda-tag>/ (gitignored via build/), with no
 #     variant level: cmake/ (the one fixed compile path), dist/, dist-shared/, releases/ (generated
@@ -141,11 +115,5 @@ gpu_tuned_assert_cmake_cache_consistent() {
         return 1
     fi
 }
-
-# Prepend CUDA bin to PATH if not already present.
-case ":${PATH}:" in
-    *":${CUDA_HOME}/bin:"*) ;;
-    *) export PATH="${CUDA_HOME}/bin:${PATH}" ;;
-esac
 
 echo "CUDA_HOME=${CUDA_HOME}  CUDA_VERSION=${CUDA_VERSION}  CUDA_VERSION_COMPACT=${CUDA_VERSION_COMPACT}"

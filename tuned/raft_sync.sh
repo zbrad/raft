@@ -15,7 +15,8 @@ git add \
   tuned/gb10/ \
   tuned/rtx40/ \
   tuned/rtx50/ \
-  tuned/devices/ \
+  tuned/common-data/ \
+  tuned/repo.env \
   tuned/*.sh \
   tuned/requirements-build-cuda13x.txt \
   tuned/releases/CHECKSUMS \

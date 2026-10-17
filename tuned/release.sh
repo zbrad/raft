@@ -110,9 +110,9 @@ if [[ ${FAILURES} -gt 0 ]]; then
 fi
 
 gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" \
-  "RAFT ${SHORT_VER} — ${GPU_TUNED_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${RELEASE_TAG#v})" \
+  "RAFT ${SHORT_VER} — ${RAFT_DEVICE_LABEL} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${RELEASE_TAG#v})" \
   "@${RELEASE_NOTES_FILE}" \
-  "${TARBALL}#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${GPU_TUNED_DEVICE_LABEL})" \
+  "${TARBALL}#RAFT ${SHORT_VER} CUDA ${CUDA_VERSION} binary package (${RAFT_DEVICE_LABEL})" \
   "${RELEASES_DIR}/CHECKSUMS_${GPU_TUNED_VARIANT}#CHECKSUMS_${GPU_TUNED_VARIANT}" \
   "${TEST_RESULTS_FILE}#Full test suite results (${GPU_TUNED_VARIANT})" \
   "${SMOKE_FILE}#Package smoke test results (${GPU_TUNED_VARIANT})"

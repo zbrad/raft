@@ -34,12 +34,12 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEVCONTAINER_CONFIG="${PROJECT_ROOT}/.devcontainer/cuda13.2-pip-spark/devcontainer.json"
 IMAGE_TAG="${IMAGE_TAG:-raft-cuda13.2-pip-spark:26.06}"
-# tuned/devices/gb10.conf is pure variable assignment (no nvcc probing),
+# tuned/common-data/devices/gb10.conf is pure variable assignment (no nvcc probing),
 # safe to source here even though this script only drives docker and needs
 # no local CUDA toolkit -- avoids a second hardcoded copy of the arch string
 # drifting from env.sh's own value.
-# shellcheck source=../devices/gb10.conf
-source "${PROJECT_ROOT}/tuned/devices/gb10.conf"
+# shellcheck source=../common-data/devices/gb10.conf
+source "${PROJECT_ROOT}/tuned/common-data/devices/gb10.conf"
 CUDA_ARCH="${GPU_TUNED_CUDA_ARCH}"
 # The image (IMAGE_TAG above) is a CUDA 13.2 toolchain; override to match another.
 CUDA_TAG="${CUDA_TAG:-cu132}"
