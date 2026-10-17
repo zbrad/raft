@@ -2274,6 +2274,120 @@ gpu_tuned_on_err() {
     } >&2
 }
 
+# --- Helpers moved here from the consumers' env.sh files (docs/ARCHITECTURE.md A7: no gpu_tuned_* function is
+# defined outside this file). Bodies are unchanged from the copies that were in raft/cuvs (cache) and faiss (pin, cccl).
+# gpu_tuned_assert_cmake_cache_consistent reads CUDA_HOME and GPU_TUNED_REPO_ROOT (set by the consumer's env.sh);
+# the source tree it expects is "${GPU_TUNED_REPO_ROOT}/cpp" unless GPU_TUNED_CMAKE_SOURCE_DIR names another.
+
+# gpu_tuned_assert_cmake_cache_consistent <cmake-build-dir>: fail if an existing CMake cache was
+# configured for another toolkit or another source tree (it would silently keep them).
+gpu_tuned_assert_cmake_cache_consistent() {
+    local cache="${1}/CMakeCache.txt" cached
+    [[ -f "${cache}" ]] || return 0
+    cached="$(sed -n 's/^CMAKE_CUDA_COMPILER:FILEPATH=//p' "${cache}" | head -1)"
+    if [[ -n "${cached}" && "${cached}" != "${CUDA_HOME}/bin/nvcc" ]]; then
+        echo "ERROR: ${cache} was configured with ${cached}, but CUDA_HOME=${CUDA_HOME}. Remove that tree first: rm -rf ${1}" >&2
+        return 1
+    fi
+    cached="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${cache}" | head -1)"
+    if [[ -n "${cached}" && "${cached}" != "${GPU_TUNED_CMAKE_SOURCE_DIR:-${GPU_TUNED_REPO_ROOT}/cpp}" ]]; then
+        echo "ERROR: ${cache} was configured for source tree ${cached}, not ${GPU_TUNED_CMAKE_SOURCE_DIR:-${GPU_TUNED_REPO_ROOT}/cpp} -- looks copied from another checkout. Remove that tree first: rm -rf ${1}" >&2
+        return 1
+    fi
+}
+
+# gpu_tuned_verify_pin_honored <package-name> <pinned-dir> <actual-dir>
+# Confirms CMake actually used the exact directory we explicitly pinned
+# via -D<Package>_DIR=..., rather than silently overriding it and falling
+# back to its own broader search. This is a STRONGER, more direct check
+# than gpu_tuned_verify_cccl_toolkit_match below: CMake's find_package
+# silently discards an explicit _DIR hint that fails a version constraint
+# (e.g. PACKAGE_FIND_VERSION) and searches elsewhere instead, with no
+# error of its own -- confirmed empirically: an explicit CUB_DIR pin at
+# CUDA_HOME=13.2 (bundled CCCL 3.2.0, below the 3.3.3 minimum this build
+# needed) was silently ignored, and the ONLY visible symptom was the
+# final resolved path being different -- no CMake warning or error
+# flagged the override itself. Waiting to see whether the resulting
+# version happens to still satisfy a loose min-major/warn-on-minor check
+# (gpu_tuned_verify_cccl_toolkit_match) is not good enough: a rejected
+# pin means our intent was silently discarded, which is exactly the class
+# of surprising, silent drift this whole tuned-builds convention exists
+# to eliminate -- so this is unconditionally fatal, not a warning,
+# regardless of what the fallback happened to land on.
+gpu_tuned_verify_pin_honored() {
+    local pkg_name="$1" pinned_dir="$2" actual_dir="$3"
+    if [[ -z "${pinned_dir}" ]]; then
+        return 0  # we never pinned this package -- nothing to verify
+    fi
+    if [[ "$(readlink -f "${pinned_dir}" 2>/dev/null)" != "$(readlink -f "${actual_dir}" 2>/dev/null)" ]]; then
+        echo "ERROR: explicit -D${pkg_name}_DIR=\"${pinned_dir}\" was silently overridden by CMake" >&2
+        echo "  (actually resolved to \"${actual_dir}\"). This means CUDA_HOME's own bundled" >&2
+        echo "  ${pkg_name} failed CMake's version check (PACKAGE_FIND_VERSION) and was rejected --" >&2
+        echo "  CMake does not surface this as its own warning or error, it just searches" >&2
+        echo "  elsewhere. Upgrade to a newer CUDA_HOME toolkit, or investigate why the pin" >&2
+        echo "  failed, rather than trusting whatever CMake's fallback search happened to find." >&2
+        return 1
+    fi
+    echo "OK: ${pkg_name} used the explicitly pinned directory (${actual_dir})"
+}
+
+# gpu_tuned_verify_cccl_toolkit_match <resolved-dir> <package-name>
+#                                     <expected-cuda-ver>
+# Extracts a CUDA major.minor embedded in a resolved CMake package
+# directory's path (e.g. .../cuda-13.2/... or .../CUDA/v13.3/...) and
+# compares it against the toolkit this build is actually using
+# (CUDA_HOME's own version). Real gap this closes: CMake's
+# find_package(CUB/Thrust/libcudacxx/CCCL CONFIG) -- triggered by
+# cuvs-dependencies.cmake's find_dependency(CCCL) chain -- searches
+# broadly and can resolve to a DIFFERENT installed CUDA toolkit than the
+# one nvcc itself is using. Confirmed empirically: WSL's default
+# Windows-PATH interop exposes side-by-side Windows CUDA installs
+# (multiple versions), and one of them won this search ahead of the
+# Linux toolkit's own bundled copy, even though CUDA_HOME/PATH correctly
+# steered nvcc itself to the intended toolkit.
+#
+# MAJOR mismatch is always fatal (real ABI break risk, same philosophy
+# as gpu_tuned_verify_cuda_compat). MINOR mismatch warns by default
+# (CCCL is largely header-only and version-tolerant within a major
+# series) -- set GPU_TUNED_STRICT_TOOLKIT_MATCH=1 to make ANY
+# difference (including minor) fatal.
+gpu_tuned_verify_cccl_toolkit_match() {
+    local dep_dir="$1" pkg_name="$2" expected_cuda_ver="$3"
+    if [[ -z "${dep_dir}" || ! -d "${dep_dir}" ]]; then
+        echo "NOTE: gpu_tuned_verify_cccl_toolkit_match: no resolved directory for ${pkg_name} -- skipping." >&2
+        return 0
+    fi
+    local found_ver
+    found_ver="$(echo "${dep_dir}" | grep -oE '(cuda-|CUDA/v)[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    if [[ -z "${found_ver}" ]]; then
+        echo "NOTE: gpu_tuned_verify_cccl_toolkit_match: could not extract a CUDA version from" \
+             "${pkg_name}'s resolved path (${dep_dir}) -- skipping version comparison." >&2
+        return 0
+    fi
+    local found_major="${found_ver%%.*}" found_minor="${found_ver#*.}"
+    local expected_major="${expected_cuda_ver%%.*}" expected_minor="${expected_cuda_ver#*.}"
+    if [[ "${found_major}" != "${expected_major}" ]]; then
+        echo "ERROR: ${pkg_name} resolved to CUDA ${found_ver} (${dep_dir}), but this build is" \
+             "using CUDA ${expected_cuda_ver} (CUDA_HOME=${CUDA_HOME:-<unset>}) -- MAJOR version" \
+             "mismatch, real ABI break risk." >&2
+        return 1
+    fi
+    if [[ "${found_minor}" != "${expected_minor}" ]]; then
+        if [[ "${GPU_TUNED_STRICT_TOOLKIT_MATCH:-0}" == "1" ]]; then
+            echo "ERROR: ${pkg_name} resolved to CUDA ${found_ver} (${dep_dir}), but this build is" \
+                 "using CUDA ${expected_cuda_ver} -- minor version mismatch, and" \
+                 "GPU_TUNED_STRICT_TOOLKIT_MATCH=1 requires an exact major.minor match." >&2
+            return 1
+        fi
+        echo "WARNING: ${pkg_name} resolved to CUDA ${found_ver} (${dep_dir}), but this build is" \
+             "using CUDA ${expected_cuda_ver} -- minor version differs. Usually fine (CCCL is" \
+             "largely header-only and version-tolerant within a major series), but set" \
+             "GPU_TUNED_STRICT_TOOLKIT_MATCH=1 to make this fatal." >&2
+        return 0
+    fi
+    echo "OK: ${pkg_name} resolved to CUDA ${found_ver}, matches this build's CUDA ${expected_cuda_ver}"
+}
+
 if [[ -z "${GPU_TUNED_NO_ERR_TRAP:-}" && -z "$(trap -p ERR)" ]]; then
     set -o errtrace
     trap 'gpu_tuned_on_err "$?" "${BASH_COMMAND}"' ERR
