@@ -948,14 +948,10 @@ gpu_tuned__git_info_fields() {
     fi
 }
 
-# gpu_tuned_embed_build_info_json <elf> [name[:type]=value]... -- stamps <elf> with the JSON object built from
-# the arguments plus the checkout's git fields and a UTC "built" time (arguments win over the automatic
-# fields). Replaces any earlier .tuned_build_info section, so it is idempotent. A caller-given field
-# `fork.url=` overrides the origin URL. Run it from inside the repo, like the older stamp.
-gpu_tuned_embed_build_info_json() {
-    local target="${1:-}" tmp json line auto=() given=() a name
-    shift || true
-    [ -f "${target}" ] || { echo "ERROR: gpu_tuned_embed_build_info_json: ${target:-<none>} is not a file." >&2; return 1; }
+# gpu_tuned__build_info_full [name[:type]=value]... -- (internal) prints the JSON object for the arguments plus the
+# checkout's git fields and a UTC "built" time (arguments win over the automatic fields). Run from inside the repo.
+gpu_tuned__build_info_full() {
+    local auto=() given=() a line name
     for a in "$@"; do given+=("${a}"); done
     while IFS= read -r line; do
         [ -n "${line}" ] || continue
@@ -963,12 +959,34 @@ gpu_tuned_embed_build_info_json() {
         for a in "${given[@]+"${given[@]}"}"; do [ "${a%%[:=]*}" = "${name}" ] && continue 2; done
         auto+=("${line}")
     done < <(gpu_tuned__git_info_fields)
-    json="$(gpu_tuned_build_info_json "${given[@]+"${given[@]}"}" "${auto[@]+"${auto[@]}"}" "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)")" || return 1
+    gpu_tuned_build_info_json "${given[@]+"${given[@]}"}" "${auto[@]+"${auto[@]}"}" "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+# gpu_tuned_embed_build_info_json <elf> [name[:type]=value]... -- stamps <elf> with the JSON object built from
+# the arguments plus the checkout's git fields and a UTC "built" time (arguments win over the automatic
+# fields). Replaces any earlier .tuned_build_info section, so it is idempotent. A caller-given field
+# `fork.url=` overrides the origin URL. Run it from inside the repo, like the older stamp.
+gpu_tuned_embed_build_info_json() {
+    local target="${1:-}" tmp json
+    shift || true
+    [ -f "${target}" ] || { echo "ERROR: gpu_tuned_embed_build_info_json: ${target:-<none>} is not a file." >&2; return 1; }
+    json="$(gpu_tuned__build_info_full "$@")" || return 1
     tmp="$(mktemp)"
     printf '%s\n' "${json}" > "${tmp}"
     objcopy --remove-section .tuned_build_info "${target}" 2>/dev/null || true
     objcopy --add-section .tuned_build_info="${tmp}" "${target}" || { rm -f "${tmp}"; return 1; }
     rm -f "${tmp}"
+}
+
+# gpu_tuned_write_build_info_json <out-file> [name[:type]=value]... -- the same JSON object as
+# gpu_tuned_embed_build_info_json, written to <out-file> (one line) for an artifact that is not an ELF and so cannot carry a
+# section: a static archive, a tree of files. Ship the file in the artifact as BUILD_INFO.json (docs/ARCHITECTURE.md H7).
+gpu_tuned_write_build_info_json() {
+    local out="${1:-}" json
+    shift || true
+    [ -n "${out}" ] || { echo "ERROR: gpu_tuned_write_build_info_json: need an output file." >&2; return 1; }
+    json="$(gpu_tuned__build_info_full "$@")" || return 1
+    printf '%s\n' "${json}" > "${out}"
 }
 
 # gpu_tuned_read_build_info <elf> -- prints the build info as one line of JSON. Reads .tuned_build_info when
@@ -1018,7 +1036,23 @@ gpu_tuned_verify_build_info_json() {
     local file="${1:-}" json
     shift || true
     json="$(gpu_tuned_read_build_info "${file}")" || return 1
-    python3 - "${json}" "$@" <<'PY'
+    gpu_tuned__verify_json_fields "${json}" "$@"
+}
+
+# gpu_tuned_verify_build_info_json_file <json-file> [name[:type]=expected]... -- the same field check for a
+# BUILD_INFO.json written by gpu_tuned_write_build_info_json (an artifact that is not an ELF). Fails loudly naming the
+# field, the expected and the actual value; with no fields it only requires valid JSON.
+gpu_tuned_verify_build_info_json_file() {
+    local file="${1:-}" json
+    shift || true
+    [ -s "${file}" ] || { echo "ERROR: gpu_tuned_verify_build_info_json_file: ${file:-<none>} is missing or empty." >&2; return 1; }
+    json="$(cat "${file}")"
+    gpu_tuned__verify_json_fields "${json}" "$@"
+}
+
+# gpu_tuned__verify_json_fields <json-text> [name[:type]=expected]... -- (internal) shared by the two verifiers above.
+gpu_tuned__verify_json_fields() {
+    python3 - "$@" <<'PY'
 import json, re, sys
 try:
     obj = json.loads(sys.argv[1])
@@ -1378,6 +1412,23 @@ PY
     echo "OK: ${fn}: ${base} installs and loads cleanly (${imp} ${modver}${cap:+, device ${cap}, cuda ${cuda_ver}})"
 }
 
+# gpu_tuned_require_pushed [repo-dir] -- fail unless HEAD is contained in a branch on origin (fetched first). A GitHub
+# release tags a commit on the remote: with an unpushed HEAD, `gh release create --target <branch>` silently tags the
+# remote branch's OLD tip, so the tag and the uploaded artifact name different sources (found 2026-10-18: a cu133
+# package built from an unpushed merge was published against the previous tip). rc 1 names the cause.
+gpu_tuned_require_pushed() {
+    local dir="${1:-.}" head contained
+    head="$(git -C "${dir}" rev-parse HEAD 2>/dev/null)" || { echo "ERROR: gpu_tuned_require_pushed: ${dir} is not a git checkout." >&2; return 1; }
+    git -C "${dir}" remote get-url origin >/dev/null 2>&1 || { echo "ERROR: gpu_tuned_require_pushed: ${dir} has no 'origin' remote." >&2; return 1; }
+    git -C "${dir}" fetch -q origin 2>/dev/null || { echo "ERROR: gpu_tuned_require_pushed: could not fetch origin to check that HEAD is pushed." >&2; return 1; }
+    contained="$(git -C "${dir}" branch -r --contains "${head}" 2>/dev/null | grep -v ' -> ' || true)"
+    if [[ -z "${contained}" ]]; then
+        echo "ERROR: gpu_tuned_require_pushed: HEAD ${head:0:9} is not on any origin branch; push it first (a release tags the commit it names)." >&2
+        return 1
+    fi
+    echo "OK: HEAD ${head:0:9} is on origin ($(echo "${contained}" | head -1 | tr -d ' '))"
+}
+
 # gpu_tuned_publish_release <owner/repo> <tag> <title> <notes-or-@notes-file>
 # [asset-spec ...] — publish a GitHub release via `gh release create`,
 # always targeting the "tuned-builds" branch (every consumer in this fleet
@@ -1402,6 +1453,7 @@ gpu_tuned_publish_release() {
     local repo="$1" tag="$2" title="$3" notes="$4"
     shift 4
     gpu_tuned_require_clean_tree || return 1
+    gpu_tuned_require_pushed || return 1
     gpu_tuned_check_release_tag "${tag}" || return 1
     local asset path
     for asset in "$@"; do
@@ -1421,7 +1473,7 @@ gpu_tuned_publish_release() {
     if ! gh release create "${tag}" \
         --repo "${repo}" \
         --title "${title}" \
-        --target "tuned-builds" \
+        --target "${GPU_TUNED_RELEASE_TARGET:-$(git rev-parse HEAD)}" \
         "${notes_args[@]}" \
         "$@"; then
         return 1

@@ -41,8 +41,8 @@ IMAGE_TAG="${IMAGE_TAG:-raft-cuda13.2-pip-spark:26.06}"
 # shellcheck source=../common-data/devices/gb10.conf
 source "${PROJECT_ROOT}/tuned/common-data/devices/gb10.conf"
 CUDA_ARCH="${GPU_TUNED_CUDA_ARCH}"
-# The image (IMAGE_TAG above) is a CUDA 13.2 toolchain; override to match another.
-CUDA_TAG="${CUDA_TAG:-cu132}"
+# The image (IMAGE_TAG above) is built for one toolkit; the caller names it (no default toolkit).
+CUDA_TAG="${CUDA_TAG:?set CUDA_TAG to the toolkit the image carries, e.g. cu132}"
 # shellcheck source=../common.sh
 source "${PROJECT_ROOT}/tuned/common.sh"
 
@@ -151,7 +151,6 @@ check_warn() {
 # ── image-level checks (hard failures) ──────────────────────────────────────
 check_eq "CUDAARCHS"              "${EXPECTED_CUDAARCHS:-}" "${CUDAARCHS:-}"
 check_eq "PYTHON_PACKAGE_MANAGER" "pip"  "${PYTHON_PACKAGE_MANAGER:-}"
-check    "nvcc present"           which nvcc
 check    "nvcc executes"          nvcc --version
 check    "python3 present"        which python3
 check    "python3 executes"       python3 --version
