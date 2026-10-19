@@ -1481,6 +1481,140 @@ gpu_tuned_publish_release() {
     echo "OK: published ${repo}@${tag} -- https://github.com/${repo}/releases/tag/${tag}"
 }
 
+# --- release vs publish (docs/ARCHITECTURE.md B3, I3, I5) -------------------------------------------
+# release.sh runs the gates and, only if all pass, writes a ready-marker (gpu_tuned_release_ready). It never
+# publishes. publish.sh reads the marker and publishes exactly what the gates saw (gpu_tuned_publish_ready); with no
+# marker, or with HEAD or an asset changed since, it refuses. So nothing is published by running release.sh.
+
+# gpu_tuned_release_gates key=value ... -- the gates every native release.sh repeated. Run it from the repo root.
+# Keys: tag variant cuda info (package-info.txt) built (the build-tree library the tests linked; optional)
+# test_log test_pass (ERE that must match the test log) tarball smoke_log notes packaged (the packaged commit).
+# Prints "  ok:" / "  FAIL:" lines; rc 1 if any failed. A repo adds its own gates around the call with the same format.
+gpu_tuned_release_gates() {
+    local kv k v tag="" variant="" cuda="" info="" built="" test_log="" test_pass="" tarball="" smoke_log="" notes="" packaged=""
+    for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        case "${k}" in
+            tag|variant|cuda|info|built|test_log|test_pass|tarball|smoke_log|notes|packaged) printf -v "${k}" '%s' "${v}" ;;
+            *) echo "ERROR: gpu_tuned_release_gates: unknown key '${k}'" >&2; return 2 ;;
+        esac
+    done
+    local f=0 got changed
+    _gate_fail() { echo "  FAIL: $*" >&2; f=$((f + 1)); }
+    _gate_ok() { echo "  ok:   $*"; }
+
+    gpu_tuned_check_release_tag "${tag}" >/dev/null 2>&1 && _gate_ok "tag carries a date label" || _gate_fail "tag ${tag} carries no date label"
+    gpu_tuned_require_clean_tree >/dev/null 2>&1 && _gate_ok "clean tracked tree" || _gate_fail "tracked files differ from HEAD (commit or stash)"
+    gpu_tuned_require_pushed >/dev/null 2>&1 && _gate_ok "HEAD is on origin" || _gate_fail "HEAD is not on origin (push it: a release tags the commit it names)"
+
+    if [[ -z "${test_log}" || ! -f "${test_log}" ]]; then
+        _gate_fail "test log not found: ${test_log:-<unset>} -- run tuned/full_test.sh"
+    elif [[ -n "${built}" && ! -e "${built}" ]]; then
+        _gate_fail "${built} not found -- cannot tell whether the test results are fresh; run tuned/build.sh"
+    elif [[ -n "${built}" && "${built}" -nt "${test_log}" ]]; then
+        _gate_fail "${built} is newer than ${test_log}: the test results predate the build; re-run tuned/full_test.sh"
+    elif ! grep -qE "${test_pass}" "${test_log}"; then
+        _gate_fail "${test_log} does not show a clean pass (looked for: ${test_pass})"
+    else
+        _gate_ok "full test suite passed, log newer than the build"
+    fi
+
+    if [[ -z "${tarball}" || ! -f "${tarball}" ]]; then
+        _gate_fail "tarball not found: ${tarball:-<unset>}"
+    else
+        got="$(sha256sum "${tarball}" | awk '{print $1}')"
+        if [[ "${got}" == "$(sed -n 's/^sha256=//p' "${info}" 2>/dev/null)" ]]; then _gate_ok "tarball sha256 matches package-info.txt"; else _gate_fail "tarball sha256 does not match package-info.txt"; fi
+        if gpu_tuned_verify_sha256_sidecar "${tarball}" 2>/dev/null; then _gate_ok "sha256 sidecar matches the tarball"; else _gate_fail "sha256 sidecar missing or not matching the tarball"; fi
+        if [[ -f "${test_log}" && "${test_log}" -nt "${tarball}" ]]; then _gate_fail "the test log is newer than the tarball; package again after testing"; else _gate_ok "tarball was made after the tests"; fi
+        if [[ ! -f "${smoke_log}" ]]; then _gate_fail "smoke log not found: ${smoke_log:-<unset>} -- run tuned/smoke_test.sh"
+        elif [[ "${tarball}" -nt "${smoke_log}" ]]; then _gate_fail "the tarball is newer than the smoke log; re-run tuned/smoke_test.sh"
+        elif ! grep -q "Smoke test summary: passed" "${smoke_log}"; then _gate_fail "${smoke_log} does not show a pass"
+        else _gate_ok "smoke test of this tarball passed"; fi
+    fi
+    if grep -qxF "cuda_tag=${cuda}" "${info}" 2>/dev/null && grep -qxF "variant=${variant}" "${info}" 2>/dev/null; then
+        _gate_ok "package-info.txt is for ${variant} ${cuda}"
+    else
+        _gate_fail "package-info.txt is for another toolkit or variant"
+    fi
+
+    changed="$(git diff --name-only "${packaged}" HEAD -- . ':!tuned/releases' 2>/dev/null || echo '?')"
+    if [[ -z "${changed}" ]]; then _gate_ok "only release notes changed since the packaged commit ${packaged}"
+    else _gate_fail "files other than tuned/releases/ changed since the packaged commit ${packaged}: $(echo "${changed}" | head -3 | tr '\n' ' ')"; fi
+
+    if [[ ! -f "${notes}" ]]; then _gate_fail "${notes} not found"
+    elif grep -q 'DRAFT — not yet published' "${notes}"; then _gate_fail "${notes} is still a draft (DRAFT banner present)"
+    elif ! git ls-files --error-unmatch "${notes}" >/dev/null 2>&1; then _gate_fail "${notes} is not committed"
+    else _gate_ok "release notes ${notes##*/} committed"; fi
+
+    unset -f _gate_fail _gate_ok
+    [[ ${f} -eq 0 ]]
+}
+
+# gpu_tuned_release_marker_clear <marker> -- release.sh calls this first, so a failing run leaves no marker.
+gpu_tuned_release_marker_clear() {
+    rm -f -- "${1:?gpu_tuned_release_marker_clear: marker path required}" "${1}.published"
+}
+
+# gpu_tuned_release_ready <marker> <owner/repo> <tag> <title> <notes-file> <asset-spec ...> -- after every gate passed,
+# record what publish.sh may publish: the repo, tag, title, HEAD, the notes file and each asset (path#label) with the
+# sha256 of each. Does not publish. Asset paths and the notes file are stored absolute.
+gpu_tuned_release_ready() {
+    local marker="${1:?marker}" repo="${2:?repo}" tag="${3:?tag}" title="${4:?title}" notes="${5:?notes}"
+    shift 5
+    [[ $# -gt 0 ]] || { echo "ERROR: gpu_tuned_release_ready: no assets given." >&2; return 1; }
+    [[ -f "${notes}" ]] || { echo "ERROR: gpu_tuned_release_ready: ${notes} not found." >&2; return 1; }
+    local tmp="${marker}.tmp.$$" spec path
+    mkdir -p "$(dirname "${marker}")"
+    {
+        echo "repo=${repo}"
+        echo "tag=${tag}"
+        echo "title=${title}"
+        echo "head=$(git rev-parse HEAD)"
+        echo "notes=$(realpath "${notes}")"
+        echo "notes_sha256=$(sha256sum "${notes}" | awk '{print $1}')"
+        for spec in "$@"; do
+            path="${spec%%#*}"
+            [[ -f "${path}" ]] || { echo "ERROR: gpu_tuned_release_ready: asset ${path} not found." >&2; rm -f -- "${tmp}"; return 1; }
+            echo "asset=$(realpath "${path}")${spec#"${path}"}"
+            echo "asset_sha256=$(sha256sum "${path}" | awk '{print $1}')"
+        done
+    } > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${marker}"
+    echo "READY: ${tag} passed every gate; nothing was published. Publish it with: bash tuned/publish.sh <variant>"
+}
+
+# gpu_tuned_publish_ready <marker> -- publish.sh's whole job. Refuses unless the marker exists and HEAD, the notes and
+# every asset are exactly what release.sh's gates saw; then gpu_tuned_publish_release (clean tree, pushed, tag shape);
+# then the marker is renamed <marker>.published so the same gates cannot publish twice. Run it from the repo root.
+gpu_tuned_publish_ready() {
+    local marker="${1:?marker}" line k v repo="" tag="" title="" head="" notes="" notes_sha=""
+    local -a assets=() shas=()
+    [[ -f "${marker}" ]] || { echo "ERROR: no ready-marker at ${marker} -- run tuned/release.sh first; it must pass every gate." >&2; return 1; }
+    while IFS= read -r line; do
+        k="${line%%=*}"; v="${line#*=}"
+        case "${k}" in
+            repo) repo="${v}" ;; tag) tag="${v}" ;; title) title="${v}" ;; head) head="${v}" ;;
+            notes) notes="${v}" ;; notes_sha256) notes_sha="${v}" ;;
+            asset) assets+=("${v}") ;; asset_sha256) shas+=("${v}") ;;
+        esac
+    done < "${marker}"
+    [[ -n "${repo}" && -n "${tag}" && -n "${head}" && ${#assets[@]} -gt 0 && ${#assets[@]} -eq ${#shas[@]} ]] \
+        || { echo "ERROR: ${marker} is incomplete; run tuned/release.sh again." >&2; return 1; }
+    [[ "$(git rev-parse HEAD)" == "${head}" ]] \
+        || { echo "ERROR: HEAD moved since release.sh passed (${head:0:9} -> $(git rev-parse --short=9 HEAD)); run tuned/release.sh again." >&2; return 1; }
+    [[ -f "${notes}" && "$(sha256sum "${notes}" | awk '{print $1}')" == "${notes_sha}" ]] \
+        || { echo "ERROR: the release notes changed since release.sh passed; run tuned/release.sh again." >&2; return 1; }
+    local i path
+    for i in "${!assets[@]}"; do
+        path="${assets[$i]%%#*}"
+        [[ -f "${path}" && "$(sha256sum "${path}" | awk '{print $1}')" == "${shas[$i]}" ]] \
+            || { echo "ERROR: ${path} changed or vanished since release.sh passed; run tuned/release.sh again." >&2; return 1; }
+    done
+    echo "Publishing ${repo}@${tag} (${#assets[@]} assets, HEAD ${head:0:9})..."
+    gpu_tuned_publish_release "${repo}" "${tag}" "${title}" "@${notes}" "${assets[@]}" || return 1
+    mv -f -- "${marker}" "${marker}.published"
+}
+
 # gpu_tuned_verify_venv <venv-dir> <repo-root> — sanity-checks an existing
 # venv before build.sh/wheel.sh reuse it, instead of silently building on
 # top of corruption. Catches two concrete failure modes hit in practice: a
