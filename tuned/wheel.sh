@@ -1,9 +1,11 @@
 #!/bin/bash
 # wheel.sh <variant> — build libraft-<variant>-cuXX +
 # pylibraft-<variant>-cuXX + raft-dask-<variant>-cuXX wheels for the given
-# GPU variant (gb10/rtx40/rtx50) and package them for release,
-# alongside copies of the shared librmm-cu13/rmm-cu13 wheels (built once
-# by raft_wheel_librmm_shared.sh -- run that first). Shared implementation
+# GPU variant (gb10/rtx40/rtx50) into tuned/build/<cuda_tag>/dist/, alongside
+# copies of the shared librmm-cu13/rmm-cu13 wheels (built once by
+# raft_wheel_librmm_shared.sh -- run that first). It publishes NOTHING: a wheel
+# release is its own gated step, like a native one, and its tag and gates are
+# still to be defined. Shared implementation
 # behind every gb10/rtx40/rtx50 raft_wheel_<variant>.sh wrapper.
 #
 # Each package is built from a per-variant staging copy under
@@ -24,17 +26,6 @@ source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 BUILD_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
 INSTALL_DIR="${BUILD_DIR}/install"
 VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
-# Derive short version (e.g. 26.06.00 -> 26.6)
-SHORT_VER="$(gpu_tuned_short_ver "${VERSION}")" || exit 1
-RELEASE_TAG="v${VERSION}-${GPU_TUNED_PLATFORM}-cuda${CUDA_VERSION_COMPACT}-${GPU_TUNED_VARIANT}"
-RELEASE_TITLE="RAFT ${SHORT_VER} — ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${GPU_TUNED_HW_LABEL}) wheels"
-# Canonical release-notes filename (WITH the _cu<N> suffix, since the CUDA
-# minor version varies release to release and shouldn't be left implicit)
-# -- release.sh derives this identically, independently (they're
-# separate invocations, not passed between each other; the fix is that
-# both compute it via the same one-line expression, not that one produces
-# it for the other).
-RELEASE_NOTES="${PROJECT_ROOT}/tuned/releases/RELEASE_NOTES_${SHORT_VER}_${GPU_TUNED_VARIANT}_cu${CUDA_VERSION_COMPACT}.md"
 DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
 WHEEL_SRC="${BUILD_DIR}/wheel-src"
 # RMM is fetched as a C++ build dependency of raft via rapids-cmake's CPM
@@ -330,26 +321,14 @@ RAFT_DASK_WHEEL="$(ls "${DIST_DIR}"/raft_dask*.whl 2>/dev/null | head -1)" || tr
 [[ -z "${RAFT_DASK_WHEEL}" ]] && { echo "ERROR: raft-dask wheel not found" >&2; exit 1; }
 echo "raft-dask wheel: $(basename "${RAFT_DASK_WHEEL}") ($(du -sh "${RAFT_DASK_WHEEL}" | awk '{print $1}'))"
 
-# ── 4. Publish all five wheels ────────────────────────────────────────────────
-# librmm-cu13/rmm-cu13 are copies of the shared build (raft_wheel_librmm_shared.sh
-# published them under their own release already); bundled here too so this
-# one release remains a complete, one-stop install for this GPU variant.
-cd "${PROJECT_ROOT}"
-
-if [[ -f "${RELEASE_NOTES}" ]]; then
-    NOTES="@${RELEASE_NOTES}"
-else
-    NOTES="pylibraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + libraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} + raft-dask-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2} ${VERSION}+cu${CUDA_VERSION_COMPACT} wheels for ${GPU_TUNED_PLATFORM} / CUDA ${CUDA_VERSION} / SM_${GPU_TUNED_CUDA_ARCH} (${GPU_TUNED_HW_LABEL}), bundled with the shared librmm-cu13/rmm-cu13 $(basename "${LIBRMM_WHEEL}") build (no device code -- shared across GPU variants, see raft_wheel_librmm_shared.sh)"
-fi
-
-echo "Publishing wheels to GitHub release ${RELEASE_TAG}..."
-gpu_tuned_publish_release "zbrad/raft" "${RELEASE_TAG}" "${RELEASE_TITLE}" "${NOTES}" \
-    "${LIBRMM_WHEEL}#$(basename "${LIBRMM_WHEEL}")" \
-    "${RMM_WHEEL}#$(basename "${RMM_WHEEL}")" \
-    "${LIBRAFT_WHEEL}#$(basename "${LIBRAFT_WHEEL}")" \
-    "${PYLIBRAFT_WHEEL}#$(basename "${PYLIBRAFT_WHEEL}")" \
-    "${RAFT_DASK_WHEEL}#$(basename "${RAFT_DASK_WHEEL}")"
-
+# ── 4. Built, not published ──────────────────────────────────────────────────
+# librmm-cu13/rmm-cu13 are copies of the shared build (raft_wheel_librmm_shared.sh);
+# they sit in the same dist directory so this one directory is a complete install set
+# for this GPU variant. Nothing is tagged or published here.
 echo ""
-echo "Release: https://github.com/zbrad/raft/releases/tag/${RELEASE_TAG}"
-echo "Done."
+echo "Built (not published): ${DIST_DIR}"
+echo "  libraft:    $(basename "${LIBRAFT_WHEEL}")"
+echo "  pylibraft:  $(basename "${PYLIBRAFT_WHEEL}")"
+echo "  raft-dask:  $(basename "${RAFT_DASK_WHEEL}")"
+echo "  librmm/rmm: $(basename "${LIBRMM_WHEEL}"), $(basename "${RMM_WHEEL}")"
+echo "Next: tuned/wheel_validate.sh ${GPU_TUNED_VARIANT}, then a separate gated release step."
