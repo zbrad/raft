@@ -39,3 +39,31 @@ internally — see that file's `rapids-cmake-value-to-clone` logic).
 | `v26.12-gb10-cu133-g0ecd5206` | [`0ecd5206`](https://github.com/zbrad/raft/commit/0ecd5206) | [`61a96c8f`](https://github.com/rapidsai/rapids-cmake/commit/61a96c8f29731affd7fd913a586673dd057dc3b0) ([zip](https://github.com/rapidsai/rapids-cmake/archive/61a96c8f29731affd7fd913a586673dd057dc3b0.zip)) | 2026-10-15 | CUDA 13.3.73 build of the same library source as `v26.12-gb10-cu134-g0fa8a51f`, with nvtx3 fetched and shipped (`lib/cmake/nvtx3/`, `include/nvtx3/`) and the `-tuned` shared objects; `package.sh` gates on a consumer configure against the package alone. 16/16 gtest binaries, 7,605 tests passed, 44 skipped (run on `e9459893`, finished 2026-10-15 04:18Z; 4 need 2 GPUs, 40 are SelectK cases the test skips by design). tarball sha256 `7929c5d9c11806b5992b0934ca52f70eb08e86d96f78eb0d28fe72f704da8d84`. cuVS pairing: [`v26.12-gb10-cu133-g1f3c58b6`](https://github.com/zbrad/cuvs/releases/tag/v26.12-gb10-cu133-g1f3c58b6); 37/37 binaries. Supersedes `v26.12-gb10-cu133-g680788c8`. **Superseded 2026-10-15 by `v0.20261015.0-gb10-cu133`** (the same library, repackaged under the date-label name). **Release and tag deleted 2026-10-15** (replaced by the date-label release); the commit is still in history. |
 | `v0.20261015.0-gb10-cu134` | [`b074681e`](https://github.com/zbrad/raft/commit/b074681e) (built; packaged at [`d4c1825a`](https://github.com/zbrad/raft/commit/d4c1825a)) | [`61a96c8f`](https://github.com/rapidsai/rapids-cmake/commit/61a96c8f29731affd7fd913a586673dd057dc3b0) ([zip](https://github.com/rapidsai/rapids-cmake/archive/61a96c8f29731affd7fd913a586673dd057dc3b0.zip)) | 2026-10-15 | Re-release of `v26.12-gb10-cu134-g0fa8a51f` under the date-label tag (docs/ARCHITECTURE.md E2): repackaged from the same build tree, not rebuilt. CUDA 13.4. Full suite 16/16 gtest binaries (log attached). Package smoke test (log attached): sha256, consumer configure, `CORE_TEST_NOCUDA`, `MATRIX_SELECT_TEST`, `UTILS_TEST` against the package's own libraries. tarball sha256 `68cc13a512d2201b19d9be797a132b1a0ae5673d573a0bce0a2c885997f981c7`. cuVS pairing: [`v0.20261015.0-gb10-cu134`](https://github.com/zbrad/cuvs/releases/tag/v0.20261015.0-gb10-cu134). Supersedes `v26.12-gb10-cu134-g0fa8a51f`. |
 | `v0.20261015.0-gb10-cu133` | [`e9459893`](https://github.com/zbrad/raft/commit/e9459893) (built; packaged at [`d4c1825a`](https://github.com/zbrad/raft/commit/d4c1825a)) | [`61a96c8f`](https://github.com/rapidsai/rapids-cmake/commit/61a96c8f29731affd7fd913a586673dd057dc3b0) ([zip](https://github.com/rapidsai/rapids-cmake/archive/61a96c8f29731affd7fd913a586673dd057dc3b0.zip)) | 2026-10-15 | Re-release of `v26.12-gb10-cu133-g0ecd5206` under the date-label tag (docs/ARCHITECTURE.md E2): repackaged from the same build tree, not rebuilt. CUDA 13.3. Full suite 16/16 gtest binaries (log attached). Package smoke test (log attached): sha256, consumer configure, `CORE_TEST_NOCUDA`, `MATRIX_SELECT_TEST`, `UTILS_TEST` against the package's own libraries. tarball sha256 `aa8f7334388488c85be56f56d24245fbabee869324635c6cebfba0d0f8fef166`. cuVS pairing: [`v0.20261015.0-gb10-cu133`](https://github.com/zbrad/cuvs/releases/tag/v0.20261015.0-gb10-cu133). Supersedes `v26.12-gb10-cu133-g0ecd5206`. |
+
+## Producer to consumer pairing (raft -> cuVS)
+
+Producer: this repo (`zbrad/raft`). Consumer: `zbrad/cuvs`, whose `tuned/docs/RELEASE_PINS.md` records the raft
+release each cuVS release was built against (its "Built against raft release" column). Release state is from
+`gh release list --repo zbrad/raft` and `gh release list --repo zbrad/cuvs` (2026-10-18), and from the notes in both
+tables. "not recorded" means no source here says it. Test results for each published cuVS release are in the cuVS
+table notes.
+
+| cuVS release (consumer) | raft release it was built against | raft release state | cuVS release state |
+|---|---|---|---|
+| `v26.10-gb10-cu133-g418242c3` | `v26.10-gb10-cu133-g37ba10e2` | deleted 2026-10-12 | published; supersession not recorded |
+| `v26.12-gb10-cu134-g6bb1419c` | `v26.12-gb10-cu134-g9d97792e` | deleted 2026-10-12 | deleted |
+| `v26.12-gb10-cu133-g1c38fcf18` | `v26.12-gb10-cu133-g9fcf3a1f` | deleted 2026-10-12 | deleted |
+| `v26.12-gb10-cu134-g34e6199d` | `v26.12-gb10-cu134-g6ddfdeae` | superseded 2026-10-13 by `v26.12-gb10-cu134-g0fa8a51f`; deleted 2026-10-15 | superseded 2026-10-13 by `v26.12-gb10-cu134-g424288ff`; deleted 2026-10-15 |
+| `v26.12-gb10-cu133-gcc3a7a1b` | `v26.12-gb10-cu133-g680788c8` | superseded 2026-10-15 by `v26.12-gb10-cu133-g0ecd5206`; deleted 2026-10-15 | deleted 2026-10-15 |
+| `v26.12-gb10-cu134-g424288ff` | `v26.12-gb10-cu134-g0fa8a51f` | superseded 2026-10-15 by `v0.20261015.0-gb10-cu134`; deleted 2026-10-15 | superseded 2026-10-15 by `v0.20261015.0-gb10-cu134`; deleted 2026-10-15 |
+| `v26.12-gb10-cu133-g1f3c58b6` | `v26.12-gb10-cu133-g0ecd5206` | superseded 2026-10-15 by `v0.20261015.0-gb10-cu133`; deleted 2026-10-15 | superseded 2026-10-15 by `v0.20261015.0-gb10-cu133`; deleted 2026-10-15 |
+| `v0.20261015.0-gb10-cu134` | `v0.20261015.0-gb10-cu134` | published (current) | published (current) |
+| `v0.20261015.0-gb10-cu133` | `v0.20261015.0-gb10-cu133` | published (current) | published (current) |
+
+Raft releases that no cuVS row names as their consumer: `v26.12-gb10-cu134-g3a508503` (raft row: cuVS pairing pending),
+`v26.12-gb10-cu134-ga5db5823` (raft row: no cuVS pairing; cuVS row: none), `v26.12-gb10-cu134-ga57c8910` and
+`v26.12-rtx40-cu134-ge27a5e00` (no cuVS pairing recorded).
+
+Not recorded: the cuVS build outputs for `v0.20261018.0-gb10-cu134` and `-cu133` (unpublished, under
+`tuned/build/`) have a `package-info.txt` with no raft release field, so the raft release behind them is not
+recorded.
