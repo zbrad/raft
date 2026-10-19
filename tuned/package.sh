@@ -173,5 +173,5 @@ NOTES
     echo "Wrote DRAFT release notes: ${NOTES_FILE#"${PROJECT_ROOT}"/}"
 fi
 
-echo "Packaged ${RELEASE_TAG}. Next: tuned/smoke_test.sh ${GPU_TUNED_VARIANT}, then tuned/release.sh ${GPU_TUNED_VARIANT}."
+echo "Packaged ${RELEASE_TAG}. Next: tuned/smoke_test.sh ${GPU_TUNED_VARIANT}, then tuned/release.sh ${GPU_TUNED_VARIANT}, then tuned/publish.sh ${GPU_TUNED_VARIANT}."
 echo "Done."

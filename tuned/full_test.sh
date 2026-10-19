@@ -8,8 +8,8 @@
 #
 # Writes a timestamped results log to tuned/build/<cuda_tag>/releases/, which
 # release.sh requires (fresher than the built .so, containing the
-# success marker) before it will publish, and attaches as a release
-# asset -- see release.sh's own comment for why.
+# success marker) before it will mark a release ready, and publish.sh attaches
+# as a release asset -- see release.sh's own comment for why.
 export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 GPU_TUNED_ARG_VARIANT="$1"

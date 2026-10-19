@@ -4,7 +4,7 @@ Tracks every published `tuned-builds` release: which repo commit it was
 built from, and which exact `rapids-cmake` commit it was configured
 against (`-Drapids-cmake-sha=...`, see `tuned/build.sh`). Update this
 table as part of publishing a release — add a row before or right after
-running `tuned/release.sh`.
+running `tuned/publish.sh` (after `tuned/release.sh` has passed its gates).
 
 Why this exists: `rapids-cmake` is fetched unpinned by default
 (`RAPIDS.cmake` falls through to `RAPIDS_BRANCH`, which upstream sets to
