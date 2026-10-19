@@ -150,5 +150,28 @@ variant=${GPU_TUNED_VARIANT}
 sha256=${SHA256}
 INFO
 
+# DRAFT release notes (docs/ARCHITECTURE.md H5): the file release.sh expects, written only when it does not exist yet and
+# never over an existing one. The banner line is what the author deletes after reviewing the draft and committing it.
+NOTES_FILE="${PROJECT_ROOT}/tuned/releases/RELEASE_NOTES_${RELEASE_TAG#v}.md"
+if [[ -e "${NOTES_FILE}" ]]; then
+    echo "Release notes ${NOTES_FILE#"${PROJECT_ROOT}"/} already exist; not overwritten."
+else
+    TEST_LOG="${RELEASES_DIR}/TEST_RESULTS_${GPU_TUNED_VARIANT}.log"
+    TEST_SUMMARY="$(grep -a 'Full test suite summary' "${TEST_LOG}" 2>/dev/null | tail -1 | sed 's/^=* *//; s/ *=*$//' || true)"
+    cat > "${NOTES_FILE}" <<NOTES
+<!-- DRAFT — not yet published: review, then delete this line and commit -->
+# RAFT ${VERSION} — GB10 / DGX Spark (CUDA ${CUDA_VERSION}) — ${RELEASE_TAG}
+
+**Package**: \`${PKG_NAME}.tar.bz2\`, built at \`${BUILD_COMMIT}\`
+
+Describe what changed in this release here.
+
+## Tested
+
+- ${TEST_SUMMARY:-No full test log at ${TEST_LOG}; run tuned/full_test.sh ${GPU_TUNED_VARIANT} first.}
+NOTES
+    echo "Wrote DRAFT release notes: ${NOTES_FILE#"${PROJECT_ROOT}"/}"
+fi
+
 echo "Packaged ${RELEASE_TAG}. Next: tuned/smoke_test.sh ${GPU_TUNED_VARIANT}, then tuned/release.sh ${GPU_TUNED_VARIANT}."
 echo "Done."
