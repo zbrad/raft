@@ -1,12 +1,12 @@
 #!/bin/bash
 # full_test.sh <variant> — run every built gtest binary for the
-# given GPU variant (cpp/build/<cuda_tag>/<variant>/gtests/*), not just the 2
+# given GPU variant (tuned/build/<cuda_tag>/cmake/gtests/*), not just the 2
 # targeted checks in regression_test.sh. Slower and
 # comprehensive; run this before a release, not on every iteration.
 # Shared implementation behind every
 # gb10/rtx40/rtx50 raft_full_test_<variant>.sh wrapper.
 #
-# Writes a timestamped results log to tuned/releases/, which
+# Writes a timestamped results log to tuned/build/<cuda_tag>/releases/, which
 # release.sh requires (fresher than the built .so, containing the
 # success marker) before it will publish, and attaches as a release
 # asset -- see release.sh's own comment for why.

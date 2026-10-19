@@ -7,7 +7,7 @@
 # behind every gb10/rtx40/rtx50 raft_wheel_<variant>.sh wrapper.
 #
 # Each package is built from a per-variant staging copy under
-# cpp/build/<cuda_tag>/<variant>/wheel-src/ (see raft_wheel_common.sh) instead of
+# tuned/build/<cuda_tag>/cmake/wheel-src/ (see raft_wheel_common.sh) instead of
 # patching the real python/<pkg>/ sources in place and reverting via a
 # trap. The git-tracked tree is never modified, so there's nothing to
 # revert and no risk of one package's build leaking into another's (the
@@ -65,7 +65,7 @@ SHARED_DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared
 rm -rf "${DIST_DIR}" "${WHEEL_SRC}"
 mkdir -p "${DIST_DIR}" "${WHEEL_SRC}"
 # Copy the pre-built, shared librmm/rmm wheels into this variant's own
-# dist dir so a single `pip install dist/<cuda_tag>/<variant>/*.whl` and a single
+# dist dir so a single `pip install tuned/build/<cuda_tag>/dist/*.whl` and a single
 # GitHub release still provide everything this variant needs -- the
 # BUILD happens once (raft_wheel_librmm_shared.sh), but each variant's
 # release still bundles copies for one-stop installability.

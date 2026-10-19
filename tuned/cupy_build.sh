@@ -1,6 +1,6 @@
 #!/bin/bash
 # cupy_build.sh <variant> — Build a CUDA-arch-specific cupy
-# wheel for the given GPU variant and place it in dist/<cuda_tag>/<variant>/. Shared
+# wheel for the given GPU variant and place it in tuned/build/<cuda_tag>/dist/. Shared
 # implementation behind every gb10/rtx40/rtx50
 # raft_cupy_build_<variant>.sh wrapper.
 #
@@ -27,7 +27,7 @@
 # Environment variables honoured:
 #   CUPY_VERSION           default: 14.0.1
 #   CUDA_ARCH               default: this variant's GPU_TUNED_CUDA_ARCH
-#   DIST_DIR                default: <repo>/dist/<cuda_tag>/<variant>
+#   DIST_DIR                default: <repo>/tuned/build/<cuda_tag>/dist
 #   CUPY_NUM_BUILD_JOBS      default: $(nproc)
 #   CUPY_NUM_NVCC_THREADS    default: 2
 
