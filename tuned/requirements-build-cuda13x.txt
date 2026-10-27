@@ -18,6 +18,10 @@
 rapids-build-backend>=0.4.1,<0.5.0
 # scikit-build-core 0.12.x: 0.12.2 validated; cap at 0.13 to avoid breaking changes
 scikit-build-core[pyproject]>=0.12.0,<0.13.0
+# The wheel builds need CMake >=4.0 (scikit-build-core finds it on PATH) and Ninja. The host's CMake is 3.30,
+# so the build venv supplies both instead of relying on whatever is installed system-wide.
+cmake>=4.0
+ninja
 # Cython (required to build pylibraft's and raft-dask's .pyx extensions).
 # raft_wheel_*.sh use `pip wheel --no-build-isolation`, so pyproject.toml's
 # own build-time "cython>=3.2.2" requirement is never auto-installed -- it
