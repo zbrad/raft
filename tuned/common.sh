@@ -2833,10 +2833,12 @@ gpu_tuned_audit_deps() {
 import json, re, sys
 report, wheel = sys.argv[1], sys.argv[2]
 own = re.sub(r"[-_.]+", "-", wheel.rsplit("/", 1)[-1].split("-", 1)[0]).lower()
+others = 0
 for item in json.load(open(report))["install"]:
     meta = item["metadata"]
     if re.sub(r"[-_.]+", "-", meta["name"]).lower() == own:
         continue
+    others += 1
     if item.get("is_direct"):
         # A direct-URL dependency (our own tuned torch or flashinfer wheel) has a local version that is not on PyPI.
         sys.stderr.write(f'not audited (direct URL, not on PyPI): {meta["name"]}=={meta["version"]}\n')
@@ -2846,17 +2848,22 @@ for item in json.load(open(report))["install"]:
         sys.stderr.write(f'not audited (local wheel, not on PyPI): {meta["name"]}=={meta["version"]}\n')
         continue
     sys.stdout.write(f'{meta["name"]}=={meta["version"]}\n')
+if not others:
+    open(report + ".nodeps", "w").close()  # the wheel has no runtime dependencies: nothing to audit is a pass, not a failure
 PY
         fi
-        if [[ ${rc} -eq 0 ]]; then
+        if [[ ${rc} -eq 0 && -e "${work}/report.json.nodeps" ]]; then
+            echo "the wheel has no runtime dependencies; nothing to audit."
+            echo "RESULT: no vulnerable package has a fix available"
+        elif [[ ${rc} -eq 0 ]]; then
             [[ -s "${work}/reqs.txt" ]] || { echo "ERROR: the wheel resolved to no dependencies; the audit has nothing to check." >&2; rc=1; }
         fi
-        if [[ ${rc} -eq 0 ]]; then
+        if [[ ${rc} -eq 0 && ! -e "${work}/report.json.nodeps" ]]; then
             "${work}/venv/bin/pip-audit" --no-deps --disable-pip -r "${work}/reqs.txt" --format json \
                 > "${work}/audit.json" 2> "${work}/audit.err" || true
             [[ -s "${work}/audit.json" ]] || { sed 's/^/  /' "${work}/audit.err" >&2; echo "ERROR: pip-audit produced no result." >&2; rc=1; }
         fi
-        if [[ ${rc} -eq 0 ]]; then
+        if [[ ${rc} -eq 0 && ! -e "${work}/report.json.nodeps" ]]; then
             python3 -I - "${work}/audit.json" "${GPU_TUNED_AUDIT_ALLOW_FILE:-${here}/audit_allow.txt}" <<'PY' || rc=1
 import json, sys
 audit_path, allow_path = sys.argv[1], sys.argv[2]
