@@ -315,6 +315,9 @@ echo "Building raft-dask-${GPU_TUNED_VARIANT} wheel v${VERSION}+cu${CUDA_VERSION
 # shared object file" even though nvidia-nccl-cu13 IS installed (confirmed
 # empirically): the wheel is present, just not on the dynamic linker's
 # default search path, and nothing set an RPATH to it at link time.
+# env -u CONDA_PREFIX: with it set, the fetched ucxx's rapids_cmake_support_conda_env makes a conda_env target that its
+# export set rejects ("requires target conda_env that is not in any export set"). The venv is already active (PATH).
+env -u CONDA_PREFIX \
 CMAKE_PREFIX_PATH="${INSTALL_DIR};${UCX_CMAKE_PREFIX}" \
 SKBUILD_CMAKE_ARGS="-Draft_ROOT=${INSTALL_DIR};-DNCCL_LIBRARY=${NCCL_LIBRARY};-DNCCL_INCLUDE_DIR=${NCCL_PREFIX}/include;-DUSE_NCCL_RUNTIME_WHEEL=ON" \
     pip wheel \
