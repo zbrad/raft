@@ -87,5 +87,9 @@ GPU_TUNED_BUILD_ROOT="${GPU_TUNED_REPO_ROOT}/tuned/build/${CUDA_TAG}"
 export CCACHE_DIR="${GPU_TUNED_BUILD_ROOT}/ccache"
 export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-40G}"
 export GPU_TUNED_BUILD_ROOT
+# The Python build venv for the wheel and cupy builds: one per toolkit, like the rest of the tree (librmm/rmm are built
+# once and shared by every variant). gpu_tuned_setup_build_venv creates it; the native C++ steps do not use it.
+GPU_TUNED_VENV_DIR="${GPU_TUNED_BUILD_ROOT}/venv"
+export GPU_TUNED_VENV_DIR
 
 echo "CUDA_HOME=${CUDA_HOME}  CUDA_VERSION=${CUDA_VERSION}  CUDA_VERSION_COMPACT=${CUDA_VERSION_COMPACT}"
