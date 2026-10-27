@@ -105,14 +105,14 @@ stage_repo_root_refs "${PROJECT_ROOT}" "${WHEEL_SRC}"
 # across every GPU variant (see raft_wheel_librmm_shared.sh; no per-arch
 # device code means no per-variant distribution name is needed either).
 patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
-    "- librmm-cu${CUDA_VERSION_COMPACT:0:2}==26\.8\.\*,>=0\.0\.0a0" \
+    "- librmm-cu${CUDA_VERSION_COMPACT:0:2}==[0-9][0-9]*\.[0-9][0-9]*\.\*,>=0\.0\.0a0" \
     "- librmm-cu${CUDA_VERSION_COMPACT:0:2}==${RMM_SHORT_VER}.*,>=0.0.0a0" \
-    "libraft's librmm dependency (version -- our shared librmm-cu13 wheel is actually RMM's own ${RMM_VERSION}, not raft's 26.8.*)"
+    "libraft's librmm dependency (version -- our shared librmm-cu13 wheel is actually RMM's own ${RMM_VERSION}, not raft's own series)"
 # pylibraft/raft-dask ALSO directly depend on bare "rmm==26.8.*" (the
 # PYTHON rmm package, separate from librmm) -- same version mismatch,
 # fixed the same way via raft_wheel_librmm_shared.sh's rmm-cu13 build.
 patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
-    "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==26\.8\.\*,>=0\.0\.0a0" \
+    "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==[0-9][0-9]*\.[0-9][0-9]*\.\*,>=0\.0\.0a0" \
     "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==${RMM_SHORT_VER}.*,>=0.0.0a0" \
     "pylibraft/raft-dask's rmm (python) dependency (version)"
 
