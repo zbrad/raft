@@ -3,12 +3,10 @@
 # across every GPU-architecture variant (gb10/rtx40/rtx50). Builds only: it
 # publishes nothing (a wheel release is its own, gated step, like a native one).
 #
-# Run it inside a DEDICATED virtualenv, never your everyday Python: it
-# `pip install`s the build requirements and force-reinstalls nothing outside
-# the environment it runs in. Point CONDA_PREFIX at the venv (this script puts
-# ${CONDA_PREFIX}/bin first on PATH, ahead of ~/.local/bin):
-#   uv venv /path/to/venv --python 3.14
-#   CONDA_PREFIX=/path/to/venv CUDA_TAG=cu133 bash tuned/raft_wheel_librmm_shared.sh
+# It `pip install`s the build requirements into the toolkit's build venv
+# (tuned/build/<cuda-tag>/venv, made by gpu_tuned_setup_build_venv), never your everyday
+# Python, and force-reinstalls nothing outside it:
+#   CUDA_TAG=cu133 bash tuned/raft_wheel_librmm_shared.sh
 #
 # The toolkit is named (CUDA_TAG=cu133 or CUDA_VER=13.3), never found by
 # scanning /usr/local or by nvcc on PATH. SOURCE_ARCH names the variant whose
