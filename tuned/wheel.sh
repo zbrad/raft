@@ -40,10 +40,16 @@ RMM_VERSION="$(cat "${RMM_SRC}/VERSION")"
 RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 
 # ── install build deps ─────────────────────────────────────────────────────────
-echo "Installing build dependencies..."
+# The build venv (C9, tuned-common): created or reused, activated, current setuptools. CONDA_PREFIX points at it because
+# the wheel builds were always run with CONDA_PREFIX=<dedicated venv> (rapids-build-backend and the PATH above use it).
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
+export CONDA_PREFIX="${VIRTUAL_ENV}"
+echo "Installing build dependencies into ${VIRTUAL_ENV}..."
 pip install \
     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
     -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt"
+# The current setuptools, installed last so nothing above can hold it back (C8, tuned-common).
+gpu_tuned_install_setuptools || exit 1
 
 SHARED_DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared)"
 [[ -n "$(ls "${SHARED_DIST_DIR}"/librmm*.whl 2>/dev/null)" && -n "$(ls "${SHARED_DIST_DIR}"/rmm_*.whl 2>/dev/null)" ]] || {
@@ -320,6 +326,16 @@ SKBUILD_CMAKE_ARGS="-Draft_ROOT=${INSTALL_DIR};-DNCCL_LIBRARY=${NCCL_LIBRARY};-D
 RAFT_DASK_WHEEL="$(ls "${DIST_DIR}"/raft_dask*.whl 2>/dev/null | head -1)" || true
 [[ -z "${RAFT_DASK_WHEEL}" ]] && { echo "ERROR: raft-dask wheel not found" >&2; exit 1; }
 echo "raft-dask wheel: $(basename "${RAFT_DASK_WHEEL}") ($(du -sh "${RAFT_DASK_WHEEL}" | awk '{print $1}'))"
+
+# ── dependency gates (H9, H10; tuned-common) ──
+# Each wheel's runtime dependencies are audited: its sibling wheels come from this dist directory and the RAPIDS
+# nightly packages from their index, so neither is on PyPI and both are listed as "not audited" in the log.
+gpu_tuned_check_venv_setuptools "${GPU_TUNED_VENV_DIR}" || exit 1
+for w in "${LIBRAFT_WHEEL}" "${PYLIBRAFT_WHEEL}" "${RAFT_DASK_WHEEL}"; do
+    gpu_tuned_audit_deps "${w}" "${GPU_TUNED_BUILD_ROOT}/dependency-audit-$(basename "${w}" .whl).log" \
+        --find-links "${DIST_DIR}" --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+        || { echo "ERROR: dependency audit failed for $(basename "${w}") (see above)." >&2; exit 1; }
+done
 
 # ── 4. Built, not published ──────────────────────────────────────────────────
 # librmm-cu13/rmm-cu13 are copies of the shared build (raft_wheel_librmm_shared.sh);

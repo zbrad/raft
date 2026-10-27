@@ -37,6 +37,9 @@ GPU_TUNED_ARG_VARIANT="$1"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=env.sh
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
+# The toolkit's build venv (C9, tuned-common): pip builds the cupy wheel there, not in the user's environment.
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
+gpu_tuned_install_setuptools || exit 1
 
 CUPY_VERSION="${CUPY_VERSION:-14.0.1}"
 CUDA_ARCH="${CUDA_ARCH:-${GPU_TUNED_CUDA_ARCH}}"

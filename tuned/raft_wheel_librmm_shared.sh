@@ -40,13 +40,6 @@ export PATH="${CONDA_PREFIX:+$CONDA_PREFIX/bin:}$HOME/.local/bin:/usr/local/sbin
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# The build requirements are pip-installed below: refuse to do that into anything but a dedicated environment.
-if [[ -z "${CONDA_PREFIX:-}" || ! -x "${CONDA_PREFIX}/bin/pip" ]]; then
-    echo "ERROR: run this inside a dedicated virtualenv: CONDA_PREFIX=<venv> bash tuned/raft_wheel_librmm_shared.sh" >&2
-    echo "  (it pip-installs the build requirements; ${CONDA_PREFIX:-CONDA_PREFIX unset} has no bin/pip)" >&2
-    exit 1
-fi
-
 if [[ -z "${SOURCE_ARCH:-}" ]]; then
     case "$(uname -m)" in
         aarch64) SOURCE_ARCH=gb10 ;;
@@ -84,10 +77,17 @@ DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared)"
 WHEEL_SRC_RMM="${SOURCE_BUILD_DIR}/wheel-src-rmm-shared"
 
 echo "librmm/rmm wheels: ${WHEEL_VERSION} (rmm ${RMM_VERSION}, ${CUDA_TAG}, source variant ${SOURCE_ARCH})"
-echo "Installing build dependencies into ${CONDA_PREFIX}..."
+# The build requirements are pip-installed below, so this runs in the toolkit's build venv, never the user's
+# environment (C9, tuned-common; it replaces the old check that CONDA_PREFIX was a dedicated venv). CONDA_PREFIX
+# points at it because these builds were always run with CONDA_PREFIX=<dedicated venv>.
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
+export CONDA_PREFIX="${VIRTUAL_ENV}"
+echo "Installing build dependencies into ${VIRTUAL_ENV}..."
 pip install \
     --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
     -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt"
+# The current setuptools, installed last so nothing above can hold it back (C8, tuned-common).
+gpu_tuned_install_setuptools || exit 1
 
 rm -rf "${DIST_DIR}" "${WHEEL_SRC_RMM}"
 mkdir -p "${DIST_DIR}" "${WHEEL_SRC_RMM}"
@@ -202,6 +202,15 @@ SKBUILD_CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
 RMM_WHEEL="$(ls "${DIST_DIR}"/rmm_*.whl 2>/dev/null | head -1)" || true
 [[ -z "${RMM_WHEEL}" ]] && { echo "ERROR: rmm wheel not found" >&2; exit 1; }
 echo "rmm wheel: $(basename "${RMM_WHEEL}") ($(du -sh "${RMM_WHEEL}" | awk '{print $1}'))"
+
+# Dependency gates (H9, H10; tuned-common): the build venv's setuptools, then each wheel's runtime dependencies. The
+# sibling wheel comes from this dist directory and RAPIDS nightly packages from their index (listed as "not audited").
+gpu_tuned_check_venv_setuptools "${GPU_TUNED_VENV_DIR}" || exit 1
+for w in "${DIST_DIR}"/librmm*.whl "${RMM_WHEEL}"; do
+    gpu_tuned_audit_deps "${w}" "${GPU_TUNED_BUILD_ROOT}/dependency-audit-$(basename "${w}" .whl).log" \
+        --find-links "${DIST_DIR}" --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
+        || { echo "ERROR: dependency audit failed for $(basename "${w}") (see above)." >&2; exit 1; }
+done
 
 echo ""
 echo "Built (not published): ${DIST_DIR}"
