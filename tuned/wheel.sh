@@ -193,7 +193,7 @@ PYLIBRAFT_STAGED="${WHEEL_SRC}/python/pylibraft"
 patch_line_or_fail "${PYLIBRAFT_STAGED}/pyproject.toml" \
     '^name = "pylibraft"' "name = \"pylibraft-${GPU_TUNED_VARIANT}\"" "pylibraft package name"
 patch_line_or_fail "${PYLIBRAFT_STAGED}/pyproject.toml" \
-    '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true"\ncommit-files = []' \
+    '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true;use_cuda_wheels=false"\ncommit-files = []' \
     "pylibraft matrix-entry"
 echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${PYLIBRAFT_STAGED}/pylibraft/VERSION"
 # Editing pylibraft's own "libraft==" line in pyproject.toml directly does
@@ -231,7 +231,7 @@ RAFT_DASK_STAGED="${WHEEL_SRC}/python/raft-dask"
 patch_line_or_fail "${RAFT_DASK_STAGED}/pyproject.toml" \
     '^name = "raft-dask"' "name = \"raft-dask-${GPU_TUNED_VARIANT}\"" "raft-dask package name"
 patch_line_or_fail "${RAFT_DASK_STAGED}/pyproject.toml" \
-    '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true"\ncommit-files = []' \
+    '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true;use_cuda_wheels=false"\ncommit-files = []' \
     "raft-dask matrix-entry"
 # Drop the hard dependency on distributed-ucxx-cu13 (UCX-based comms, an
 # ALTERNATE backend to NCCL). Traced its C++ side: raft-dask's own
