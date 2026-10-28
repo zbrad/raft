@@ -25,4 +25,13 @@ source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 # shellcheck source=env.sh
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 
-validate_wheels "$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_ARG_VARIANT}")" "3.14" "${GPU_TUNED_ARG_VARIANT}"
+# The log is the wheel flow's test result (tuned/wheel_package.sh and tuned/wheel_release.sh require its "Wheel validation passed." line).
+RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"
+mkdir -p "${RELEASES_DIR}"
+LOG="${RELEASES_DIR}/TEST_RESULTS_wheels_${GPU_TUNED_ARG_VARIANT}.log"
+{
+    echo "raft wheel validation -- variant=${GPU_TUNED_ARG_VARIANT} ${CUDA_TAG}"
+    validate_wheels "$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_ARG_VARIANT}")" "3.14" "${GPU_TUNED_ARG_VARIANT}"
+    echo "validate_wheels rc=$?"
+} 2>&1 | tee "${LOG}"
+grep -qx 'Wheel validation passed\.' "${LOG}"
