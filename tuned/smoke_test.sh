@@ -20,6 +20,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=env.sh
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 
+# CMake 4 and Ninja from the toolkit's build venv: the installed package's CMake config files need CMake 4.0 and the host has 3.30.
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
+
 TOOLKIT_LIB_DIR="${GPU_TUNED_TOOLKIT_LIB_DIR:-${CUDA_HOME}/lib64}"
 [[ -d "${TOOLKIT_LIB_DIR}" ]] || { echo "ERROR: toolkit lib dir ${TOOLKIT_LIB_DIR} not found." >&2; exit 1; }
 RELEASES_DIR="$(gpu_tuned_out_dir releases "${PROJECT_ROOT}" "${CUDA_TAG}")"

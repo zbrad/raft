@@ -8,6 +8,9 @@ GPU_TUNED_ARG_VARIANT="$1"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=env.sh
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
+
+# CMake 4 and Ninja from the toolkit's build venv: the installed package's CMake config files need CMake 4.0 and the host has 3.30.
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
 # shellcheck source=raft_wheel_common.sh
 source "${PROJECT_ROOT}/tuned/raft_wheel_common.sh" || exit 1
 INSTALL_DIR="$(gpu_tuned_out_dir build "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")/install"

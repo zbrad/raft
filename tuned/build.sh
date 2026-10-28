@@ -10,6 +10,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${PROJECT_ROOT}/tuned/env.sh" "${GPU_TUNED_ARG_VARIANT}" || exit 1
 cd "${PROJECT_ROOT}"
 
+# The toolkit's build venv (C9, tuned-common), activated for CMake 4 and Ninja: raft's cpp/CMakeLists.txt needs CMake 4.0
+# and the host has 3.30. The libraft build itself is native; only these tools come from the venv.
+gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
+pip install -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt" || exit 1
+gpu_tuned_install_setuptools || exit 1
+
 # raft-<variant>-<cuda_tag>, matching zbrad/cuvs's libcuvs-<variant>-<tag>.so
 # naming (tuned/build.sh's CUVS_LIB_NAME there) -- see cpp/CMakeLists.txt's
 # RAFT_OUTPUT_NAME override, and tuned/wheel.sh, which shares this build
@@ -67,7 +73,7 @@ gpu_tuned_warn_pip_cmake_packages
 SO_NAMES_CMAKE="${GPU_TUNED_BUILD_ROOT}/so_names.cmake"
 gpu_tuned_so_names_cmake "${SO_NAMES_CMAKE}" || exit 1
 
-LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DTUNED_SO_MARK=-${CUDA_TAG} -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR\""
+LIBRAFT_BUILD_DIR="${BUILD_DIR}" bash build.sh libraft tests --compile-lib --cache-tool=ccache "--cmake-args=\"-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH} -DRAFT_OUTPUT_NAME=${RAFT_LIB_NAME} -Drapids-cmake-sha=${RAPIDS_CMAKE_PIN_SHA} -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=${SO_NAMES_CMAKE} -DTUNED_SO_TARGETS=rmm;rapids_logger -DTUNED_SO_MARK=-${CUDA_TAG} -DCMAKE_IGNORE_PREFIX_PATH=${BUILD_DIR}/install;$(gpu_tuned_cmake_ignore_pip_prefixes) -Urmm_DIR -Urapids_logger_DIR -Unvtx3_DIR -UCMAKE_MAKE_PROGRAM\"" || exit 1
 
 # Nothing the configure resolved may come from a pip wheel: it would not be the fetched, tested copy and
 # would be missing from the package (see gpu_tuned_verify_no_pip_cmake_deps).
