@@ -26,8 +26,21 @@ CUDA_TAG=cu134 bash tuned/wheel.sh gb10                 # libraft + pylibraft + 
 CUDA_TAG=cu134 bash tuned/wheel_validate.sh gb10        # installs them in a scratch venv and exercises the extensions
 ```
 
-Wheels are not published by these scripts; a wheel release is a separate gated step whose tag and gates are not yet
-defined. `cupy_build.sh` builds a CuPy wheel for the variant's single architecture (smaller than the PyPI wheel, which bundles SASS for every architecture).
+A wheel release has its own gated flow, the same shape as the native one and independent of it (its tag is the wheels' date
+label, `v26.12.0+gb10.cu134.<YYYYMMDD>.<seq>`):
+
+```
+CUDA_TAG=cu134 bash tuned/wheel.sh gb10                 # build (also copies in the shared librmm/rmm)  -> .../dist/
+CUDA_TAG=cu134 bash tuned/wheel_validate.sh gb10        # install in a scratch venv, exercise the extensions -> TEST_RESULTS_wheels_gb10.log
+CUDA_TAG=cu134 bash tuned/wheel_package.sh gb10         # five wheels + sha256 sidecars + DRAFT notes     -> .../dist/release/
+CUDA_TAG=cu134 bash tuned/wheel_smoke_test.sh gb10      # the same checks on the packaged files           -> SMOKE_RESULTS_wheels_gb10.log
+# review and commit tuned/releases/RELEASE_NOTES_<wheel version>.md
+CUDA_TAG=cu134 bash tuned/wheel_release.sh gb10         # gates only; writes the ready-marker, never publishes
+CUDA_TAG=cu134 bash tuned/wheel_publish.sh gb10         # publishes exactly what wheel_release.sh saw
+```
+
+`wheel.sh` replaces `dist/` (including the native package.sh's output there), so package and release the native tarball first.
+`cupy_build.sh` builds a CuPy wheel for the variant's single architecture (smaller than the PyPI wheel, which bundles SASS for every architecture).
 
 ## Files
 
@@ -37,7 +50,7 @@ defined. `cupy_build.sh` builds a CuPy wheel for the variant's single architectu
 | `repo.env` | raft-only settings |
 | `common.sh`, `sync-common.sh`, `common-data/` | vendored from tuned-common; refresh with `bash tuned/sync-common.sh sync` |
 | `build.sh`, `full_test.sh`, `package.sh`, `smoke_test.sh`, `release.sh`, `publish.sh` | the native stages above |
-| `wheel.sh`, `raft_wheel_librmm_shared.sh`, `raft_wheel_common.sh`, `wheel_validate.sh`, `cupy_build.sh` | the wheel flow |
+| `wheel.sh`, `raft_wheel_librmm_shared.sh`, `raft_wheel_common.sh`, `wheel_validate.sh`, `wheel_package.sh`, `wheel_smoke_test.sh`, `wheel_release.sh`, `wheel_publish.sh`, `cupy_build.sh` | the wheel flow |
 | `requirements-build-cuda13x.txt` | build-venv requirements for the wheels (includes `cmake>=4.0` and `ninja`, because the host's CMake is older) |
 | `regression_test.sh`, `raft_full_test_monitored.sh`, `raft_monitor.sh`, `raft_sync.sh`, `raft_test_common.sh` | test helpers and monitors |
 | `gb10/`, `rtx40/`, `rtx50/` | per-variant wrapper scripts that call the shared implementations |
