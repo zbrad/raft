@@ -386,6 +386,20 @@ gpu_tuned_check_toolkit_path() {
     return "${rc}"
 }
 
+# gpu_tuned_assert_versioned_runpath <so>... -- fail if a library's RUNPATH/RPATH points through the unversioned
+# /usr/local/cuda[-<major>] (the update-alternatives link), which would bind a different toolkit than the one it was built with.
+gpu_tuned_assert_versioned_runpath() {
+    local f bad rc=0
+    for f in "$@"; do
+        bad="$(readelf -d "${f}" | sed -n 's/.*\(RUNPATH\|RPATH\).*\[\(.*\)\]/\2/p' | tr ':' '\n' | grep -E '^/usr/local/cuda(-[0-9]+)?(/|$)' || true)"
+        if [[ -n "${bad}" ]]; then
+            echo "ERROR: ${f} has an unversioned CUDA path in its RUNPATH: ${bad}" >&2
+            rc=1
+        fi
+    done
+    return "${rc}"
+}
+
 # gpu_tuned_verify_toolkit_libs <elf>... — resolves each file's libraries
 # with ldd under LD_LIBRARY_PATH=$GPU_TUNED_TOOLKIT_LIB_DIR and requires that
 # libcudart/libcublas/libcublasLt come from under CUDA_HOME and that no
