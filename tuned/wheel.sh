@@ -45,9 +45,8 @@ RMM_SHORT_VER="$(gpu_tuned_short_ver "${RMM_VERSION}")" || exit 1
 gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
 export CONDA_PREFIX="${VIRTUAL_ENV}"
 echo "Installing build dependencies into ${VIRTUAL_ENV}..."
-pip install \
-    --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
-    -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt"
+gpu_tuned_pip_install_requirements "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt" \
+    --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple || exit 1
 # The current setuptools, installed last so nothing above can hold it back (C8, tuned-common).
 gpu_tuned_install_setuptools || exit 1
 

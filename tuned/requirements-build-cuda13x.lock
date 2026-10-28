@@ -1,0 +1,26 @@
+# Locked by gpu_tuned_freeze_requirements from the build venv that passed, for requirements-build-cuda13x.txt.
+# Python 3.14.6, aarch64.
+# Regenerate: build once with GPU_TUNED_UNLOCKED=1, run gpu_tuned_freeze_requirements, review the diff.
+attrs==26.1.0
+cmake==4.4.4
+cuda-bindings==13.4.4
+cuda-core==1.2.2
+cuda-pathfinder==1.8.4
+cuda-python==13.4.4
+Cython==3.3.0
+jsonschema-specifications==2025.9.1
+jsonschema==4.26.0
+libucx-cu13==1.19.0
+ninja==1.13.2
+numpy==2.5.4
+nvidia-nccl-cu13==2.32.3
+packaging==26.3
+pathspec==1.1.1
+PyYAML==6.0.3
+rapids-build-backend==0.4.2
+rapids-dependency-file-generator==1.22.0
+rapids-logger==0.2.3
+referencing==0.37.0
+rpds-py==2026.9.1
+scikit_build_core==0.12.2
+tomlkit==0.15.2

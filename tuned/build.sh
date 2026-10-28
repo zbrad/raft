@@ -13,7 +13,7 @@ cd "${PROJECT_ROOT}"
 # The toolkit's build venv (C9, tuned-common), activated for CMake 4 and Ninja: raft's cpp/CMakeLists.txt needs CMake 4.0
 # and the host has 3.30. The libraft build itself is native; only these tools come from the venv.
 gpu_tuned_setup_build_venv "${GPU_TUNED_VENV_DIR}" "${PROJECT_ROOT}" || exit 1
-pip install -r "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt" || exit 1
+gpu_tuned_pip_install_requirements "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt" || exit 1
 gpu_tuned_install_setuptools || exit 1
 
 # raft-<variant>-<cuda_tag>, matching zbrad/cuvs's libcuvs-<variant>-<tag>.so
