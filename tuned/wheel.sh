@@ -28,6 +28,10 @@ INSTALL_DIR="${BUILD_DIR}/install"
 VERSION="$(cat "${PROJECT_ROOT}/VERSION")"
 DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" "${GPU_TUNED_VARIANT}")"
 WHEEL_SRC="${BUILD_DIR}/wheel-src"
+# The wheel label (docs/ARCHITECTURE.md E1/E4, docs/VERSIONING.md): <variant>.cu<cuda>.<YYYYMMDD>[.<seq>], allocated once here and
+# recorded in wheel-version.txt for the release step. GPU_TUNED_LABEL_SEQ=0 skips the tag lookup for a build that is never published.
+LOCAL_VERSION="$(gpu_tuned_build_local_version "${GPU_TUNED_VARIANT}" "${PROJECT_ROOT}")" || exit 1
+WHEEL_VERSION="${VERSION}+${LOCAL_VERSION}"
 # RMM is fetched as a C++ build dependency of raft via rapids-cmake's CPM
 # helper -- read here only to get its exact VERSION, so libraft/pylibraft/
 # raft-dask's dependency pins below can be repointed at the matching
@@ -60,6 +64,7 @@ SHARED_DIST_DIR="$(gpu_tuned_out_dir dist "${PROJECT_ROOT}" "${CUDA_TAG}" shared
 
 rm -rf "${DIST_DIR}" "${WHEEL_SRC}"
 mkdir -p "${DIST_DIR}" "${WHEEL_SRC}"
+echo "${WHEEL_VERSION}" > "${DIST_DIR}/wheel-version.txt"
 # Copy the pre-built, shared librmm/rmm wheels into this variant's own
 # dist dir so a single `pip install tuned/build/<cuda_tag>/dist/*.whl` and a single
 # GitHub release still provide everything this variant needs -- the
@@ -114,6 +119,21 @@ patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
     "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==[0-9][0-9]*\.[0-9][0-9]*\.\*,>=0\.0\.0a0" \
     "- rmm-cu${CUDA_VERSION_COMPACT:0:2}==${RMM_SHORT_VER}.*,>=0.0.0a0" \
     "pylibraft/raft-dask's rmm (python) dependency (version)"
+# Floors for a single-toolkit build. libraft's device code and its cuBLAS/cuSOLVER/cuSPARSE calls were built and tested with
+# this toolkit, so the pip CUDA libraries it runs against must be at least that minor (upstream allows any 13.x, and nvJitLink
+# from 13.3), and raft-dask's NCCL must be one built for it (docs/NCCL_CUDA_VERSIONS.md in tuned-common: for CUDA 13.4 only
+# nvidia-nccl-cu13 2.32.3 and later; upstream's floor is 2.19).
+RAFT_NCCL_MIN="2.32.3"
+patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
+    'cuda-toolkit\[cublas,curand,cusolver,cusparse\]==13\.\*' \
+    "cuda-toolkit\[cublas,curand,cusolver,cusparse\]>=${CUDA_VERSION},<14" \
+    "libraft's cuda-toolkit floor (the build toolkit's minor)"
+patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
+    'nvidia-nvjitlink>=13\.3,<14' "nvidia-nvjitlink>=${CUDA_VERSION},<14" \
+    "libraft's nvJitLink floor (the build toolkit's minor)"
+patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
+    'nvidia-nccl-cu13>=2\.19' "nvidia-nccl-cu13>=${RAFT_NCCL_MIN}" \
+    "raft-dask's NCCL floor (the first release built for this toolkit)"
 
 # ── 1. Build libraft-<variant>-cuXX ───────────────────────────────────────────
 # Strategy: pre-place lib<RAFT_LIB_NAME>.so (this build dir's tuned,
@@ -157,14 +177,14 @@ fi
 gpu_tuned_verify_arch "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" "${GPU_TUNED_CUDA_ARCH}" || exit 1
 cp "/tmp/raft-${GPU_TUNED_VARIANT}-install/lib/lib${RAFT_LIB_NAME}.so" "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}"
 rm -rf "/tmp/raft-${GPU_TUNED_VARIANT}-install"
-embed_build_info "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}" "${GPU_TUNED_VARIANT}" "libraft" "${VERSION}+cu${CUDA_VERSION_COMPACT}" "${GPU_TUNED_HW_LABEL}"
+embed_build_info "${LIBRAFT_STAGED}/libraft/lib64/${LIBRAFT_SONAME}" "${GPU_TUNED_VARIANT}" "libraft" "${WHEEL_VERSION}" "${GPU_TUNED_HW_LABEL}"
 
 patch_line_or_fail "${LIBRAFT_STAGED}/pyproject.toml" \
     '^name = "libraft"' "name = \"libraft-${GPU_TUNED_VARIANT}\"" "libraft package name"
 patch_line_or_fail "${LIBRAFT_STAGED}/pyproject.toml" \
     '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true;use_cuda_wheels=true"\ncommit-files = []' \
     "libraft matrix-entry"
-echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${LIBRAFT_STAGED}/libraft/VERSION"
+echo "${WHEEL_VERSION}" > "${LIBRAFT_STAGED}/libraft/VERSION"
 patch_line_or_fail "${LIBRAFT_STAGED}/libraft/load.py" \
     'soname = "libraft\.so"' "soname = \"${LIBRAFT_SONAME}\"" "libraft load.py soname"
 # load.py's bare "import librmm" (preloading librmm.so before libraft.so
@@ -173,7 +193,7 @@ patch_line_or_fail "${LIBRAFT_STAGED}/libraft/load.py" \
 # See the PyTorch-ordering citation in raft_wheel_common.sh's
 # validate_wheels() for why.
 
-echo "Building libraft-${GPU_TUNED_VARIANT} wheel v${VERSION}+cu${CUDA_VERSION_COMPACT} for ${GPU_TUNED_PLATFORM} (bundles libraft.so as ${LIBRAFT_SONAME})..."
+echo "Building libraft-${GPU_TUNED_VARIANT} wheel v${WHEEL_VERSION} for ${GPU_TUNED_PLATFORM} (bundles libraft.so as ${LIBRAFT_SONAME})..."
 SKBUILD_CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${INSTALL_DIR}" \
     pip wheel \
         --no-deps \
@@ -194,7 +214,7 @@ patch_line_or_fail "${PYLIBRAFT_STAGED}/pyproject.toml" \
 patch_line_or_fail "${PYLIBRAFT_STAGED}/pyproject.toml" \
     '^matrix-entry = .*' 'matrix-entry = "cuda_suffixed=true;use_cuda_wheels=false"\ncommit-files = []' \
     "pylibraft matrix-entry"
-echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${PYLIBRAFT_STAGED}/pylibraft/VERSION"
+echo "${WHEEL_VERSION}" > "${PYLIBRAFT_STAGED}/pylibraft/VERSION"
 # Editing pylibraft's own "libraft==" line in pyproject.toml directly does
 # NOT work -- rapids_build_backend regenerates the dependencies list from
 # dependencies.yaml at build time and silently overwrites any hand-edit
@@ -205,7 +225,7 @@ patch_line_or_fail "${WHEEL_SRC}/dependencies.yaml" \
     "- libraft-cu${CUDA_VERSION_COMPACT:0:2}==" "- libraft-${GPU_TUNED_VARIANT}-cu${CUDA_VERSION_COMPACT:0:2}==" \
     "pylibraft's libraft dependency"
 
-echo "Building pylibraft-${GPU_TUNED_VARIANT} wheel v${VERSION}+cu${CUDA_VERSION_COMPACT} for ${GPU_TUNED_PLATFORM} (SM_${GPU_TUNED_CUDA_ARCH} only)..."
+echo "Building pylibraft-${GPU_TUNED_VARIANT} wheel v${WHEEL_VERSION} for ${GPU_TUNED_PLATFORM} (SM_${GPU_TUNED_CUDA_ARCH} only)..."
 SKBUILD_CMAKE_ARGS="-Draft_ROOT=${INSTALL_DIR};-DCMAKE_PREFIX_PATH=${INSTALL_DIR};-DCMAKE_CUDA_ARCHITECTURES=${GPU_TUNED_CUDA_ARCH}" \
     pip wheel \
         --no-deps \
@@ -275,7 +295,7 @@ insert_before_or_fail "${RAFT_DASK_STAGED}/raft_dask/common/ucx.py" \
         import ucxx
 " \
     "ucx.py lazy ucxx import (import inside __init__)"
-echo "${VERSION}+cu${CUDA_VERSION_COMPACT}" > "${RAFT_DASK_STAGED}/raft_dask/VERSION"
+echo "${WHEEL_VERSION}" > "${RAFT_DASK_STAGED}/raft_dask/VERSION"
 # Same dependencies.yaml-not-pyproject.toml reasoning as step 2 -- a
 # second, different anchor line in the same staged copy (the libraft-cuXX==
 # line patched in step 2 is still there; nothing reverts a generated file).
@@ -305,7 +325,7 @@ UCX_CMAKE_PREFIX="$(python3 -c 'import libucx, os; print(os.path.dirname(libucx.
 NCCL_PREFIX="$(python3 -c 'import nvidia.nccl as m; print(list(m.__path__)[0])')"
 NCCL_LIBRARY="$(ls "${NCCL_PREFIX}"/lib/libnccl.so* | head -1)"
 
-echo "Building raft-dask-${GPU_TUNED_VARIANT} wheel v${VERSION}+cu${CUDA_VERSION_COMPACT} for ${GPU_TUNED_PLATFORM}..."
+echo "Building raft-dask-${GPU_TUNED_VARIANT} wheel v${WHEEL_VERSION} for ${GPU_TUNED_PLATFORM}..."
 # USE_NCCL_RUNTIME_WHEEL=ON (raft_dask/common/CMakeLists.txt, default OFF)
 # sets the compiled extension's RPATH to $ORIGIN/../../nvidia/nccl/lib --
 # i.e. the pip-installed nvidia-nccl-cu13 wheel's own bundled libnccl.so.2
