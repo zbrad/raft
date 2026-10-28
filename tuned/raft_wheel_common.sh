@@ -336,6 +336,11 @@ validate_wheels() {
     venv_dir="$(mktemp -d)/validate-venv"
     echo "Validating wheels in ${dist_dir}..."
     uv venv "${venv_dir}" --python "${python_version}" >&2 || return 1
+    # libucx-cu13 comes from PyPI alone: uv takes a package from the first index that has it, and the RAPIDS nightly index
+    # (below, for the packages only it carries) holds a different libucx than raft-dask pins. Installing it first, from
+    # the default index only, satisfies that pin without widening uv's index strategy.
+    uv pip install --python "${venv_dir}/bin/python" \
+        "$(grep -E '^libucx-cu13' "${PROJECT_ROOT}/tuned/requirements-build-cuda13x.txt" | head -1)" >&2 || return 1
     uv pip install --python "${venv_dir}/bin/python" \
         --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple \
         --prerelease=allow \
