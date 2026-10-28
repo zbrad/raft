@@ -326,6 +326,7 @@ gpu_tuned_verify_toolkit() {
         echo "ERROR: gpu_tuned_verify_toolkit: ${CUDA_HOME}/bin/nvcc reports release '${found}', toolkit ${TOOLKIT_ID} declares ${TOOLKIT_NVCC_RELEASE}." >&2
         return 1
     fi
+    gpu_tuned_check_toolkit_path || return 1
     if [[ -n "${TOOLKIT_NCCL_VERSION:-}" && "${TOOLKIT_NCCL_VERSION}" != none ]]; then
         if ! command -v dpkg-query >/dev/null 2>&1; then
             echo "WARNING: gpu_tuned_verify_toolkit: dpkg-query not found; NCCL ${TOOLKIT_NCCL_VERSION} not checked." >&2
@@ -343,6 +344,46 @@ gpu_tuned_verify_toolkit() {
     else
         echo "OK: toolkit ${TOOLKIT_ID}: nvcc ${found} at ${CUDA_HOME}${TOOLKIT_NCCL_VERSION:+, libnccl2 ${TOOLKIT_NCCL_VERSION}}"
     fi
+}
+
+# gpu_tuned_check_toolkit_path -- the PATH gate for the selected toolkit (called by gpu_tuned_verify_toolkit; scripts that
+# rebuild PATH afterwards can call it again). The build's CUDA tools must be the ones under $CUDA_HOME, never whatever the
+# login shell or update-alternatives happens to put first (/usr/local/cuda/bin follows the alternatives link to the newest
+# toolkit). Fails when the first `nvcc` on PATH is not under $CUDA_HOME. Every other directory on PATH that holds an nvcc of a
+# different toolkit is listed as a warning (they are shadowed while $CUDA_HOME/bin is first, but a script that resets PATH
+# would pick one up); GPU_TUNED_STRICT_TOOLKIT_PATH=1 makes that a failure too. With such a warning it also prints where the
+# /usr/local/cuda (update-alternatives) link points when that is a different toolkit, as information only.
+gpu_tuned_check_toolkit_path() {
+    local home first dir real extra=() rc=0 alt
+    home="$(readlink -f "${CUDA_HOME:-/nonexistent}")" || return 1
+    first="$(command -v nvcc 2>/dev/null || true)"
+    if [[ -z "${first}" ]]; then
+        echo "ERROR: gpu_tuned_check_toolkit_path: no nvcc on PATH; expected ${CUDA_HOME}/bin first." >&2
+        return 1
+    fi
+    real="$(readlink -f "${first}")"
+    if [[ "${real}" != "${home}"/* ]]; then
+        echo "ERROR: gpu_tuned_check_toolkit_path: the first nvcc on PATH is ${first} (${real}), not under CUDA_HOME ${CUDA_HOME}." >&2
+        return 1
+    fi
+    local IFS=:
+    for dir in ${PATH}; do
+        [[ -n "${dir}" && -x "${dir}/nvcc" ]] || continue
+        real="$(readlink -f "${dir}/nvcc")"
+        [[ "${real}" == "${home}"/* ]] || extra+=("${dir} -> ${real}")
+    done
+    unset IFS
+    if [[ ${#extra[@]} -gt 0 ]]; then
+        printf 'WARNING: gpu_tuned_check_toolkit_path: PATH also holds an nvcc from another toolkit (shadowed by %s/bin): %s\n' \
+            "${CUDA_HOME}" "${extra[*]}" >&2
+        [[ "${GPU_TUNED_STRICT_TOOLKIT_PATH:-}" == 1 ]] && rc=1
+    fi
+    if [[ ${#extra[@]} -gt 0 ]]; then
+        alt="$(readlink -f /usr/local/cuda 2>/dev/null || true)"
+        [[ -z "${alt}" || "${alt}" == "${home}" ]] \
+            || echo "note: /usr/local/cuda (update-alternatives) points at ${alt}; this build uses ${CUDA_HOME}." >&2
+    fi
+    return "${rc}"
 }
 
 # gpu_tuned_verify_toolkit_libs <elf>... — resolves each file's libraries
@@ -1664,7 +1705,8 @@ gpu_tuned_verify_venv() {
             echo "ERROR: gpu_tuned_verify_venv: ${cmake_cache}'s CMAKE_HOME_DIRECTORY (${cached_home}) does not match this repo (${repo_root}) -- this build/ dir looks copied from another repo. Delete it: rm -rf ${repo_root}/build" >&2
             return 1
         fi
-    done < <(find "${repo_root}/build" -name 'CMakeCache.txt' 2>/dev/null || true)
+    # _deps: a FetchContent sub-build's cache names its own directory as the home directory, which is correct.
+    done < <(find "${repo_root}/build" -name 'CMakeCache.txt' -not -path '*/_deps/*' 2>/dev/null || true)
 
     return 0
 }
@@ -2408,7 +2450,9 @@ gpu_tuned_verify_no_pip_cmake_deps() {
             [ -n "${p}" ] || continue
             case "${line#*=}" in "${p}"|"${p}"/*) echo "ERROR: CMake resolved ${line%%:*} from a pip wheel: ${line#*=}" >&2; bad=1; break ;; esac
         done < <(printf '%s\n' "${ign}" | tr ';' '\n')
-    done < <(grep -E '^[A-Za-z0-9_]+_(DIR|ROOT):[A-Z]+=' "${cache}" | grep -vE '^CMAKE_')
+    # SWIG_DIR is the data directory of the code generator (the build venv's swig wheel, pinned in the requirements):
+    # nothing from it is linked or shipped, so it is not a dependency of the package.
+    done < <(grep -E '^[A-Za-z0-9_]+_(DIR|ROOT):[A-Z]+=' "${cache}" | grep -vE '^(CMAKE_|SWIG_DIR:)')
     if grep -qE '^nvtx3_DIR:[A-Z]+=' "${cache}" && [ "${bad}" -ne 0 ] && gpu_tuned__nvtx3_from_pip "${cache}" "${ign}"; then
         echo "  nvtx3: this is NOT the tuned copy. The fleet fetches nvtx3 at the pinned rapids-cmake, builds and tests against" >&2
         echo "  that copy and ships it in the package. The wheel's copy is unpinned, untested here and unaligned with the rest of" >&2
@@ -2929,6 +2973,63 @@ gpu_tuned_install_setuptools() {
     printf '%s\n%s\n' "${GPU_TUNED_SETUPTOOLS_MIN}" "${have}" | sort -V -C \
         || { echo "ERROR: setuptools ${have} is older than the minimum ${GPU_TUNED_SETUPTOOLS_MIN}." >&2; return 1; }
     echo "setuptools ${have} (current release; minimum ${GPU_TUNED_SETUPTOOLS_MIN})"
+    gpu_tuned_check_venv_resolution
+}
+
+# gpu_tuned_check_venv_resolution -- with a build venv active ($VIRTUAL_ENV set), every tool the venv provides
+# (python3, pip, and cmake, ninja, swig when installed in it) must be the one the shell resolves, i.e. the venv's bin comes
+# first. A host or another project's venv ahead of it (an inherited PATH, a stale hash) would build with the wrong cmake or
+# python while the log looks right. Names each offender and fails (rc 1); with no venv active it does nothing (H11).
+gpu_tuned_check_venv_resolution() {
+    local venv="${VIRTUAL_ENV:-}" tool want got bad=0
+    [[ -n "${venv}" ]] || return 0
+    hash -r 2>/dev/null || true
+    for tool in python3 pip cmake ninja swig; do
+        want="${venv}/bin/${tool}"
+        [[ -e "${want}" ]] || continue
+        got="$(command -v "${tool}" || true)"
+        if [[ "${got}" != "${want}" ]]; then
+            echo "ERROR: ${tool} resolves to ${got:-nothing}, not the build venv's ${want}." >&2
+            bad=1
+        fi
+    done
+    [[ "${bad}" -eq 0 ]] || { echo "  The build venv's bin must come first on PATH (is another venv or a host tool ahead of it?)." >&2; return 1; }
+    echo "build venv tools resolve to ${venv}/bin"
+}
+
+# gpu_tuned_freeze_requirements <requirements-file> -- write <requirements-file minus .txt>.lock from the ACTIVE build venv:
+# every installed package as name==version (pip and setuptools left out: pip is the venv's bootstrap and setuptools is set by
+# gpu_tuned_install_setuptools to the current release, C8). The lock is what a build that passed was run with; commit it, and
+# builds install under it (gpu_tuned_pip_install_requirements), so a dependency does not move between releases unnoticed. It
+# is specific to the interpreter and platform that made it, and the header says which (H12).
+gpu_tuned_freeze_requirements() {
+    local req="${1:?usage: gpu_tuned_freeze_requirements <requirements-file>}" lock
+    lock="${req%.txt}.lock"
+    [[ -n "${VIRTUAL_ENV:-}" ]] || { echo "ERROR: gpu_tuned_freeze_requirements: no build venv is active." >&2; return 1; }
+    {
+        echo "# Locked by gpu_tuned_freeze_requirements from the build venv that passed, for ${req##*/}."
+        echo "# $(python3 -c 'import sys; print("Python", sys.version.split()[0])'), $(uname -m)."
+        echo "# Regenerate: build once with GPU_TUNED_UNLOCKED=1, run gpu_tuned_freeze_requirements, review the diff."
+        python3 -m pip freeze --disable-pip-version-check 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+==' \
+            | grep -viE '^(pip|setuptools)==' | sort -f
+    } > "${lock}" || return 1
+    echo "locked $(grep -c '==' "${lock}") packages in ${lock}"
+}
+
+# gpu_tuned_pip_install_requirements <requirements-file> [pip-args...] -- `pip install -r` the file under its lock
+# (<file minus .txt>.lock, as a constraints file) when there is one, so the versions are the locked ones. No lock, or
+# GPU_TUNED_UNLOCKED=1 (to regenerate it), installs unconstrained and says so (H12).
+gpu_tuned_pip_install_requirements() {
+    local req="${1:?usage: gpu_tuned_pip_install_requirements <requirements-file> [pip-args...]}" lock
+    shift
+    lock="${req%.txt}.lock"
+    if [[ -f "${lock}" && "${GPU_TUNED_UNLOCKED:-}" != "1" ]]; then
+        echo "installing ${req##*/} under ${lock##*/}"
+        python3 -m pip install -r "${req}" -c "${lock}" "$@"
+    else
+        echo "installing ${req##*/} UNLOCKED (no ${lock##*/}, or GPU_TUNED_UNLOCKED=1)"
+        python3 -m pip install -r "${req}" "$@"
+    fi
 }
 
 # gpu_tuned_setup_build_venv <venv-dir> <repo-root> -- the one way a build.sh gets its Python build venv (C9). It honours
