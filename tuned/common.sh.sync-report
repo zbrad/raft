@@ -1,0 +1,19 @@
+# sync-common report
+
+Written by sync-common.sh; commit it with the sync. One line per vendored file.
+
+when:   2026-11-05T21:47:34Z
+target: common.sh
+base:   fc2a6300af83a6cf84dcfe125152799f8aba29e3
+synced: 4af1bb6d1126de3d69facc03b8f948928fe95a36
+result: all files resolved
+
+updated    tuned-common.sh
+updated    devices/gb10.conf
+added      devices/n1x-win.conf
+updated    devices/rtx40.conf
+added      devices/rtx50-win.conf
+updated    devices/rtx50.conf
+unchanged  toolkits/cu133.env
+unchanged  toolkits/cu134.env
+removed    devices/n1x.conf  -- upstream dropped it and the local copy was unedited
