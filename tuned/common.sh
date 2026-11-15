@@ -2329,8 +2329,11 @@ gpu_tuned_so_has_device_code() {
     co="${CUDA_HOME:+${CUDA_HOME}/bin/}cuobjdump"
     command -v "${co}" >/dev/null 2>&1 || { echo "ERROR: gpu_tuned_so_has_device_code: cuobjdump not found (set CUDA_HOME); cannot classify ${f}." >&2; return 2; }
     out="$({ "${co}" --list-elf "${f}"; "${co}" --list-ptx "${f}"; } 2>&1 || true)"
-    if printf '%s\n' "${out}" | grep -qE '^(ELF|PTX) file +[0-9]+:'; then return 0; fi
-    if printf '%s\n' "${out}" | grep -q 'does not contain device code'; then return 1; fi
+    # Here-strings, not printf | grep -q: grep -q exits at the first match, and under pipefail the printf that is
+    # still writing a long listing takes SIGPIPE (141), which read as "not classified" (hit 2026-11-15 on a
+    # 376-line libggml-cuda listing, about 1 run in 10).
+    if grep -qE '^(ELF|PTX) file +[0-9]+:' <<< "${out}"; then return 0; fi
+    if grep -q 'does not contain device code' <<< "${out}"; then return 1; fi
     echo "ERROR: gpu_tuned_so_has_device_code: cuobjdump could not classify ${f}: $(printf '%s' "${out}" | head -1)" >&2
     return 2
 }
