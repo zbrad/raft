@@ -1278,7 +1278,8 @@ gpu_tuned_check_wheel_label() {
 }
 
 # gpu_tuned_check_release_tag <tag> -- refuses (returns 1) unless the release tag carries the
-# date label (docs/ARCHITECTURE.md E2/E3): a native tag v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda>, or a
+# date label (docs/ARCHITECTURE.md E2/E3): a native tag v<upstream-version>-<YYYYMMDD>.<seq>-<variant>-cu<cuda>
+# (or the older v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda>), or a
 # wheel tag whose version ends .cu<cuda>.<YYYYMMDD>[.<seq>]. It is gpu_tuned_date_label's own
 # grammar, so what is accepted here is what the sequence allocator sees as taken. A commit count,
 # an upstream version or a sha never names a release. GPU_TUNED_ALLOW_COUNTER_LABEL=1 also accepts a
@@ -1288,10 +1289,10 @@ gpu_tuned_check_release_tag() {
     local tag="${1:-}"
     if [[ -n "$(gpu_tuned_date_label "${tag}")" ]]; then return 0; fi
     if [[ "${GPU_TUNED_ALLOW_COUNTER_LABEL:-}" == 1 ]]; then
-        echo "WARNING: gpu_tuned_check_release_tag: '${tag}' carries no date label (GPU_TUNED_ALLOW_COUNTER_LABEL=1); migrate this repo to v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda> (native) or <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (wheel)." >&2
+        echo "WARNING: gpu_tuned_check_release_tag: '${tag}' carries no date label (GPU_TUNED_ALLOW_COUNTER_LABEL=1); migrate this repo to v<upstream-version>-<YYYYMMDD>.<seq>-<variant>-cu<cuda> (native) or <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (wheel)." >&2
         return 0
     fi
-    echo "ERROR: gpu_tuned_check_release_tag: release tag '${tag}' carries no date label. Native tags are v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda> (gpu_tuned_native_tag); wheel tags end <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (docs/ARCHITECTURE.md E2)." >&2
+    echo "ERROR: gpu_tuned_check_release_tag: release tag '${tag}' carries no date label. Native tags are v<upstream-version>-<YYYYMMDD>.<seq>-<variant>-cu<cuda> or the older v0.<YYYYMMDD>.<seq>-<variant>-cu<cuda> (gpu_tuned_native_tag); wheel tags end <variant>.cu<cuda>.<YYYYMMDD>[.<seq>] (docs/ARCHITECTURE.md E2)." >&2
     return 1
 }
 
@@ -1325,13 +1326,15 @@ gpu_tuned_verify_resolves_in() {
 
 # gpu_tuned_newest_release_tag <variant> <cuda-tag> -- reads release tags on stdin (one per line, newest
 # first, as `gh release list` prints them) and prints the newest native tag for that variant and
-# toolkit: the highest v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, ranked by date then sequence as numbers
-# (.10 above .2), never by list order. A tag in an older form (v<ver>-<variant>-<cuda>[-g<sha>]) is never
+# toolkit among the date-label forms v<upstream-version>-<YYYYMMDD>.<seq>-<variant>-<cuda-tag> and the older
+# v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag> (version 0): ranked by upstream version, then date, then sequence,
+# each compared as numbers (.10 above .2, 1.10.0 above 1.9.0), never by list order. A tag in an older form (v<ver>-<variant>-<cuda>[-g<sha>]) is never
 # preferred over a date-label one; with no date-label tag it falls back to the first older-form tag, with
 # a NOTE on stderr, so a consumer keeps working until a date-label release exists (ARCHITECTURE.md E7).
 # Prints nothing and returns 1 if no tag matches at all.
 gpu_tuned_newest_release_tag() {
-    local variant="${1:-}" cuda="${2:-}" t label key best="" bestkey="" legacy=""
+    local variant="${1:-}" cuda="${2:-}" t label key ver vkey part best="" bestkey="" legacy=""
+    local -a vparts
     local tags=()
     if ! gpu_tuned_valid_variant "${variant}" || [[ ! "${cuda}" =~ ^cu[0-9]+$ ]]; then
         echo "ERROR: gpu_tuned_newest_release_tag: need <variant> <cuNNN>, got '${variant}' '${cuda}'." >&2
@@ -1339,10 +1342,13 @@ gpu_tuned_newest_release_tag() {
     fi
     while IFS= read -r t; do tags+=("${t}"); done
     for t in "${tags[@]}"; do
-        if [[ "${t}" == "v0."*"-${variant}-${cuda}" ]]; then
-            label="$(gpu_tuned_date_label "${t}")"
-            [[ -n "${label}" ]] || continue
-            key="$(printf '%s %012d' "${label%%.*}" "$(gpu_tuned_label_seq "${label}")")"
+        label="$(gpu_tuned_date_label "${t}")"
+        if [[ -n "${label}" && "${t}" =~ ^v[0-9.]+[-.][1-9][0-9]{7}\.[0-9]+-${variant}-${cuda}$ ]]; then
+            ver="$(gpu_tuned_native_tag_version "${t}")"
+            IFS=. read -r -a vparts <<< "${ver}"
+            vkey=""
+            for part in "${vparts[@]}" 0 0 0 0; do vkey+="$(printf '%012d' "${part}")"; done
+            key="$(printf '%s %s %012d' "${vkey:0:48}" "${label%%.*}" "$(gpu_tuned_label_seq "${label}")")"
             if [[ -z "${bestkey}" || "${key}" > "${bestkey}" ]]; then best="${t}"; bestkey="${key}"; fi
         elif [[ -z "${legacy}" && "${t}" =~ ^v[0-9].*-${variant}-${cuda}(-g[0-9a-f]+)?$ ]]; then
             legacy="${t}"
@@ -1506,6 +1512,79 @@ PY
         return 1
     fi
     echo "OK: ${fn}: ${base} installs and loads cleanly (${imp} ${modver}${cap:+, device ${cap}, cuda ${cuda_ver}})"
+}
+
+# gpu_tuned_check_mapped_libs <python> <strict|allow-identical> <venv-only-prefixes> <setup-code>
+# -- prove that a process using the installed packages maps each shared library from one file, and the tuned ones
+# from the venv. In a fresh `<python> -I -W ignore` process, run from an empty directory with PYTHONPATH unset, it
+# runs <setup-code> (the caller's imports and a CUDA call, e.g. "import torch; torch.zeros(1, device=\"cuda\")"),
+# then reads the process's memory maps and refuses:
+#   1. a library name mapped from two different files. strict: any two files fail. allow-identical: byte-identical
+#      copies pass (the pip nvidia-cuda-runtime wheel and the toolkit can ship the same libcudart), and Python
+#      extension modules (names with ".cpython-") are not compared, since packages may share a file name. In both
+#      modes one WSL2 driver pair counts as one library: the /usr/lib/wsl/lib/ loader stub plus the
+#      /usr/lib/wsl/drivers/<inf dir>/ library it loads, with exactly one libdxcore mapped, from /usr/lib/wsl/lib/.
+#      (On WSL2, LD_DEBUG=files shows /usr/lib/wsl/lib/libcuda.so.1 loading libdxcore.so and then the driver-store
+#      libcuda.so.1.1 by full path.)
+#   2. a library whose name starts with one of <venv-only-prefixes> (comma-separated, e.g. "libtorch,libc10")
+#      mapped from outside the interpreter's sys.prefix.
+# Prints one verdict line, "clean", "clean (byte-identical copies of: a, b)" or the problems, and returns 0 only
+# for a clean verdict (2 for a usage error). If the probe itself fails, its last lines are printed instead.
+# GPU_TUNED_MAPS_FILE=<file> reads that file instead of the process's /proc/self/maps (for the tests).
+gpu_tuned_check_mapped_libs() {
+    local py="${1:-}" mode="${2:-}" prefixes="${3:-}" setup="${4:-}" fn="gpu_tuned_check_mapped_libs" work out verdict prc=0
+    if [[ -z "${py}" || -z "${setup}" ]]; then
+        echo "ERROR: ${fn}: usage: ${fn} <python> <strict|allow-identical> <venv-only-prefixes> <setup-code>" >&2
+        return 2
+    fi
+    case "${mode}" in
+        strict|allow-identical) ;;
+        *) echo "ERROR: ${fn}: the mode must be strict or allow-identical, not '${mode}'." >&2; return 2 ;;
+    esac
+    work="$(mktemp -d)"
+    out="$(cd "${work}" && env -u PYTHONPATH "${py}" -I -W ignore -c '
+import collections, hashlib, os, sys
+mode, setup = sys.argv[1], sys.argv[3]
+prefixes = tuple(p for p in sys.argv[2].split(",") if p)
+exec(setup, {})
+by = collections.defaultdict(set)
+for line in open(os.environ.get("GPU_TUNED_MAPS_FILE") or "/proc/self/maps"):
+    fields = line.split()
+    p = fields[-1] if fields else ""
+    if ".so" in p and p.startswith("/"):
+        by[os.path.basename(p).split(".so")[0]].add(os.path.realpath(p))
+def digest(path):
+    # An unreadable file cannot be shown identical to anything: its own path stands in, so it never matches.
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return "unreadable:" + path
+def wsl_pair(v):
+    dx = by.get("libdxcore", set())
+    return (len(v) == 2 and sum(x.startswith("/usr/lib/wsl/lib/") for x in v) == 1
+            and sum(x.startswith("/usr/lib/wsl/drivers/") for x in v) == 1
+            and len(dx) == 1 and next(iter(dx)).startswith("/usr/lib/wsl/lib/"))
+def tolerated(k, v):
+    if wsl_pair(v):
+        return True
+    return mode == "allow-identical" and (".cpython-" in k or len({digest(x) for x in v}) == 1)
+bad = [f"{k}: {sorted(v)}" for k, v in sorted(by.items()) if len(v) > 1 and not tolerated(k, v)]
+if prefixes:
+    bad += [f"{k} from {sorted(v)}" for k, v in sorted(by.items())
+            if k.startswith(prefixes) and not all(x.startswith(sys.prefix) for x in v)]
+same = sorted(k for k, v in by.items() if mode == "allow-identical" and len(v) > 1 and ".cpython-" not in k
+              and not wsl_pair(v) and len({digest(x) for x in v}) == 1)
+print("; ".join(bad) if bad else "clean" + (" (byte-identical copies of: " + ", ".join(same) + ")" if same else ""))
+' "${mode}" "${prefixes}" "${setup}" 2>&1)" || prc=$?
+    rmdir "${work}" 2>/dev/null || true
+    verdict="$(printf '%s\n' "${out}" | tail -1)"
+    if [[ "${prc}" -eq 0 && "${verdict}" == clean* ]]; then
+        echo "${verdict}"
+        return 0
+    fi
+    printf '%s\n' "${out}" | tail -5
+    return 1
 }
 
 # gpu_tuned_require_pushed [repo-dir] -- fail unless HEAD is contained in a branch on origin (fetched first). A GitHub
@@ -1961,28 +2040,57 @@ gpu_tuned_date_label() {
         local seq="${BASH_REMATCH[2]}"   # saved first: gpu_tuned_valid_date's own regex overwrites BASH_REMATCH
         gpu_tuned_valid_date "${label}" || label=""
         [ -z "${label}" ] || [ "${seq}" = 0 ] || label="${label}.${seq}"
+    elif [[ "${v}" =~ ^v(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){0,3}-([1-9][0-9]{7})\.(0|[1-9][0-9]*)-[a-z][a-z0-9]*(-[a-z0-9]+)*-cu[0-9]+$ ]]; then
+        # native release tag v<upstream-version>-<date>.<seq>-<variant>-cu<cuda> (2026-11-13)
+        label="${BASH_REMATCH[4]}"
+        local vseq="${BASH_REMATCH[5]}"   # saved first: gpu_tuned_valid_date's own regex overwrites BASH_REMATCH
+        gpu_tuned_valid_date "${label}" || label=""
+        [ -z "${label}" ] || [ "${vseq}" = 0 ] || label="${label}.${vseq}"
     fi
     [ -z "${label}" ] || printf '%s\n' "${label}"
     return 0
 }
 
-# gpu_tuned_native_tag <variant> <cuda-tag> <label> -- the release tag of a native (non-wheel)
-# build: v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, e.g. v0.20261011.0-gb10-cu134. <label> is
+# gpu_tuned_native_tag_version <tag> -- the upstream version a native release tag names:
+# "1.0.0" for v1.0.0-<date>.<seq>-<variant>-cu<cuda>, "0" for the older v0.<date>.<seq>-... form
+# (which named no upstream version). Prints nothing (exit 0) for anything else.
+gpu_tuned_native_tag_version() {
+    local t="${1:-}"
+    [[ -n "$(gpu_tuned_date_label "${t}")" ]] || return 0
+    if [[ "${t}" =~ ^v0\.[1-9][0-9]{7}\. ]]; then printf '0\n'; return 0; fi
+    if [[ "${t}" =~ ^v([0-9.]+)-[1-9][0-9]{7}\. ]]; then printf '%s\n' "${BASH_REMATCH[1]}"; fi
+    return 0
+}
+
+# gpu_tuned_native_tag <variant> <cuda-tag> <label> [<upstream-version>] -- the release tag of a native
+# (non-wheel) build. With <upstream-version> (user decision 2026-11-13, docs/VERSIONING.md):
+# v<upstream-version>-<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, e.g. v1.0.0-20261114.0-gb10-cu134, where the
+# version is the upstream release the source is based on (1-4 dot-separated canonical integers). Without
+# it, the older form v0.<YYYYMMDD>.<seq>-<variant>-<cuda-tag>, e.g. v0.20261011.0-gb10-cu134, for repos not
+# yet migrated; the 0 there names no version and ranks below any real one. <label> is
 # "<YYYYMMDD>[.<seq>]" from gpu_tuned_allocate_date_label; the sequence is always written here
 # (0 for a bare date), as a wheel version does too (user decision 2026-10-16). gpu_tuned_date_label reads the tag back.
 # A hyphenated variant stays hyphenated here -- v0.20261105.0-rtx50-win-cu134 -- because "-" is only a field
 # separator in a tag and the reader anchors on the trailing "-cu<digits>". Unlike a wheel label, which is dotted.
 gpu_tuned_native_tag() {
-    local variant="${1:-}" cuda_tag="${2:-}" label="${3:-}" date seq
+    local variant="${1:-}" cuda_tag="${2:-}" label="${3:-}" version="${4:-}" date seq
     date="${label%%.*}"
     seq="$(gpu_tuned_label_seq "${label}")"
     if ! gpu_tuned_valid_variant "${variant}" || [[ ! "${cuda_tag}" =~ ^cu[0-9]+$ ]] \
         || ! gpu_tuned_valid_date "${date}" || [[ ! "${seq}" =~ ^(0|[1-9][0-9]*)$ ]] \
         || [[ "${label}" != "${date}" && ( "${seq}" = 0 || "${label}" != "${date}.${seq}" ) ]]; then
-        echo "ERROR: gpu_tuned_native_tag: need <variant> <cuNNN> <YYYYMMDD[.seq]>, got '${variant}' '${cuda_tag}' '${label}'." >&2
+        echo "ERROR: gpu_tuned_native_tag: need <variant> <cuNNN> <YYYYMMDD[.seq]> [<upstream-version>], got '${variant}' '${cuda_tag}' '${label}' '${version}'." >&2
         return 1
     fi
-    printf 'v0.%s.%s-%s-%s\n' "${date}" "${seq}" "${variant}" "${cuda_tag}"
+    if [[ -z "${version}" ]]; then
+        printf 'v0.%s.%s-%s-%s\n' "${date}" "${seq}" "${variant}" "${cuda_tag}"
+        return 0
+    fi
+    if [[ ! "${version}" =~ ^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){0,3}$ || "${version}" == 0 ]]; then
+        echo "ERROR: gpu_tuned_native_tag: upstream version '${version}' must be 1-4 dot-separated canonical integers (e.g. 1.0.0), and not 0 alone." >&2
+        return 1
+    fi
+    printf 'v%s-%s.%s-%s-%s\n' "${version}" "${date}" "${seq}" "${variant}" "${cuda_tag}"
 }
 
 # gpu_tuned_nvcc_compact [cuda-home] -- the CUDA release that <cuda-home>/bin/nvcc reports,
@@ -3054,6 +3162,12 @@ PY
 # Prints the version so the build log records it.
 GPU_TUNED_SETUPTOOLS_MIN="${GPU_TUNED_SETUPTOOLS_MIN:-84.2}"
 
+# GPU_TUNED_PYTEST_SPEC -- the one pytest limit for every tuned repo (user, 2026-11-08). pytest 9.2.0 (pytest-dev/pytest#14758)
+# breaks PyTorch's run_test.py collection, so whole test modules ran no tests and passed; the cap stays until
+# pytorch/pytorch#202406 is in our pytorch checkout. gpu_tuned_pip_install_requirements applies it as a constraint and
+# gpu_tuned_check_pytest verifies the installed pytest.
+GPU_TUNED_PYTEST_SPEC="${GPU_TUNED_PYTEST_SPEC:-pytest<9.2}"
+
 gpu_tuned_install_setuptools() {
     local have
     python3 -m pip install --quiet --disable-pip-version-check --upgrade "setuptools>=${GPU_TUNED_SETUPTOOLS_MIN}" \
@@ -3108,17 +3222,60 @@ gpu_tuned_freeze_requirements() {
 # gpu_tuned_pip_install_requirements <requirements-file> [pip-args...] -- `pip install -r` the file under its lock
 # (<file minus .txt>.lock, as a constraints file) when there is one, so the versions are the locked ones. No lock, or
 # GPU_TUNED_UNLOCKED=1 (to regenerate it), installs unconstrained and says so (H12).
+#
+# Either way it also passes GPU_TUNED_PYTEST_SPEC as a constraint: it caps pytest when the file asks for pytest and installs
+# nothing when it does not, so a requirements file may say a bare `pytest` and its lock records the version that resolved.
+# A lock whose pytest pin is outside the spec is refused before pip runs, with the way to regenerate it.
 gpu_tuned_pip_install_requirements() {
-    local req="${1:?usage: gpu_tuned_pip_install_requirements <requirements-file> [pip-args...]}" lock
+    local req="${1:?usage: gpu_tuned_pip_install_requirements <requirements-file> [pip-args...]}" lock pinned cons rc=0
     shift
     lock="${req%.txt}.lock"
+    cons="$(mktemp "${TMPDIR:-/tmp}/gpu-tuned-constraints.XXXXXX")" || return 1
+    printf '%s\n' "${GPU_TUNED_PYTEST_SPEC}" > "${cons}"
     if [[ -f "${lock}" && "${GPU_TUNED_UNLOCKED:-}" != "1" ]]; then
-        echo "installing ${req##*/} under ${lock##*/}"
-        python3 -m pip install -r "${req}" -c "${lock}" "$@"
+        pinned="$(sed -n 's/^[Pp]ytest==\([^[:space:]]*\).*/\1/p' "${lock}" | head -1)"
+        if [[ -n "${pinned}" ]] && ! gpu_tuned_spec_allows python3 "${GPU_TUNED_PYTEST_SPEC}" "${pinned}"; then
+            echo "ERROR: ${lock##*/} pins pytest==${pinned}, outside ${GPU_TUNED_PYTEST_SPEC} (GPU_TUNED_PYTEST_SPEC)." >&2
+            echo "  Regenerate the lock: build once with GPU_TUNED_UNLOCKED=1, run gpu_tuned_freeze_requirements, review the diff." >&2
+            rm -f "${cons}"
+            return 1
+        fi
+        echo "installing ${req##*/} under ${lock##*/} and ${GPU_TUNED_PYTEST_SPEC}"
+        python3 -m pip install -r "${req}" -c "${lock}" -c "${cons}" "$@" || rc=$?
     else
-        echo "installing ${req##*/} UNLOCKED (no ${lock##*/}, or GPU_TUNED_UNLOCKED=1)"
-        python3 -m pip install -r "${req}" "$@"
+        echo "installing ${req##*/} UNLOCKED (no ${lock##*/}, or GPU_TUNED_UNLOCKED=1), under ${GPU_TUNED_PYTEST_SPEC}"
+        python3 -m pip install -r "${req}" -c "${cons}" "$@" || rc=$?
     fi
+    rm -f "${cons}"
+    return "${rc}"
+}
+
+# gpu_tuned_spec_allows <python> <requirement-spec> <version> -- rc 0 when <version> satisfies <requirement-spec> (e.g.
+# "pytest<9.2" and 9.1.0), rc 1 when it does not, rc 2 when the spec cannot be read. Uses the packaging copy that pip
+# vendors, so it works in any venv that has pip and supports every specifier pip does; pre-releases count as versions.
+gpu_tuned_spec_allows() {
+    local py="${1:?usage: gpu_tuned_spec_allows <python> <requirement-spec> <version>}" spec="${2:?usage: gpu_tuned_spec_allows <python> <requirement-spec> <version>}" ver="${3:?usage: gpu_tuned_spec_allows <python> <requirement-spec> <version>}"
+    "${py}" -W ignore - "${spec}" "${ver}" <<'PY'
+import sys
+from pip._vendor.packaging.requirements import Requirement
+try:
+    req = Requirement(sys.argv[1])
+except Exception as exc:
+    print(f"ERROR: cannot read the requirement spec {sys.argv[1]!r}: {exc}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if req.specifier.contains(sys.argv[2], prereleases=True) else 1)
+PY
+}
+
+# gpu_tuned_check_pytest <python> -- the pytest that <python> imports satisfies GPU_TUNED_PYTEST_SPEC. Call it after the
+# test dependencies are installed and before any test runs; prints the version so the log records it. No pytest is an error.
+gpu_tuned_check_pytest() {
+    local py="${1:?usage: gpu_tuned_check_pytest <python>}" have
+    have="$("${py}" -c 'from importlib.metadata import version; print(version("pytest"))' 2>/dev/null)" \
+        || { echo "ERROR: ${py} has no pytest installed (wanted ${GPU_TUNED_PYTEST_SPEC})." >&2; return 1; }
+    gpu_tuned_spec_allows "${py}" "${GPU_TUNED_PYTEST_SPEC}" "${have}" \
+        || { echo "ERROR: ${py} has pytest ${have}, outside ${GPU_TUNED_PYTEST_SPEC} (GPU_TUNED_PYTEST_SPEC)." >&2; return 1; }
+    echo "pytest ${have} (${GPU_TUNED_PYTEST_SPEC})"
 }
 
 # gpu_tuned_setup_build_venv <venv-dir> <repo-root> -- the one way a build.sh gets its Python build venv (C9). It honours
